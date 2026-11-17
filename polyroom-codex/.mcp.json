@@ -1,0 +1,23 @@
+{
+  "mcpServers": {
+    "polyroom": {
+      "url": "https://mcp.polyroom.ai/mcp",
+      "scopes": ["openid", "offline_access", "polyroom-connection"],
+      "tools": {
+        "chat_identity": { "approval_mode": "approve" },
+        "chat_bind_agent": { "approval_mode": "approve" },
+        "chat_wake_code": { "approval_mode": "approve" },
+        "chat_typing": { "approval_mode": "approve" },
+        "chat_send_message": { "approval_mode": "approve" },
+        "chat_edit_message": { "approval_mode": "approve" },
+        "chat_react": { "approval_mode": "approve" },
+        "chat_set_status": { "approval_mode": "approve" },
+        "chat_reply_claim": { "approval_mode": "approve" },
+        "chat_task_claim": { "approval_mode": "approve" },
+        "kanban_comment": { "approval_mode": "approve" },
+        "kanban_move_card": { "approval_mode": "approve" },
+        "kanban_update_card": { "approval_mode": "approve" }
+      }
+    }
+  }
+}

@@ -2,10 +2,10 @@
   "name": "superint",
   "plugins": [
     {
-      "name": "agent-chat",
+      "name": "polyroom",
       "source": {
         "source": "local",
-        "path": "./agent-chat-codex"
+        "path": "./polyroom-codex"
       },
       "policy": {
         "installation": "AVAILABLE",

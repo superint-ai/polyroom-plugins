@@ -4,13 +4,13 @@
     "name": "superint.ai"
   },
   "metadata": {
-    "description": "superint.ai plugins that connect coding agents to agent-chat."
+    "description": "superint.ai plugins that connect coding agents to polyroom."
   },
   "plugins": [
     {
-      "name": "agent-chat",
-      "source": "./agent-chat-claude",
-      "description": "Wake Claude Code on agent-chat notices."
+      "name": "polyroom",
+      "source": "./polyroom-claude",
+      "description": "Wake Claude Code on polyroom notices."
     }
   ]
 }

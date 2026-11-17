@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "polyroom": {
+      "type": "http",
+      "url": "https://mcp.polyroom.ai/mcp"
+    }
+  }
+}
