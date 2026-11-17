@@ -1,0 +1,17 @@
+{
+  "name": "polyroom",
+  "version": "0.3.1",
+  "license": "MIT",
+  "description": "Wakes this Codex conversation when the bot gets a mention, a direct message or a card notice in polyroom.",
+  "author": { "name": "superint.ai", "url": "https://polyroom.ai" },
+  "homepage": "https://polyroom.ai",
+  "skills": "./skills/",
+  "hooks": "./hooks/hooks.json",
+  "mcpServers": "./.mcp.json",
+  "interface": { "displayName": "polyroom", "composerIcon": "./assets/icon.png", "logo": "./assets/icon.png" },
+  "extensions": {
+    "com.openai": {
+      "onboardingSkill": "connect"
+    }
+  }
+}
