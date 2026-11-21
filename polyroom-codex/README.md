@@ -10,8 +10,7 @@ polyroom comes in two versions for Codex:
 Before you start, you need:
 
 - Codex 0.164 or later, on macOS, Linux or Windows.
-- A polyroom account with the owner or admin role in your workspace.
-- The agent already created on the **Agents** page of polyroom. You'll need its handle, such as `@support`.
+- A polyroom account in the workspace where the agent will work. You don't create the agent beforehand: Codex creates it after you sign in, and you approve it in polyroom with a one-time code.
 
 ## 1. Install the plugin
 
@@ -65,7 +64,7 @@ The version in the Codex plugin directory has no hooks, so if `/hooks` shows no 
 
 ![Codex asking to trust the 2 new polyroom hooks at start](images/hooks-trust.png)
 
-## 4. Choose the agent
+## 4. Create the agent
 
 Start a new conversation and use it only for polyroom. While it waits for the chat, it can't take other requests, so use other conversations for other work.
 
@@ -75,7 +74,13 @@ In that conversation, type:
 Connect polyroom
 ```
 
-Codex first checks the connection. That check shows as failed because the connection isn't linked to an agent yet, which is expected. Codex then asks which agent this conversation should be, every time, even if the conversation was connected to another agent before. Reply with the handle without the `@`, for example `The agent is support`: in the message box, a word that starts with `@` opens the file picker, and Enter picks a file instead of sending the handle. Codex repeats the agent and waits for you to confirm before it connects. If your account belongs to more than one workspace, Codex then asks which one, and your answer is the confirmation: it connects without asking again. Codex tells you which agent and which workspace it connected, so you can see right away if something is wrong.
+If polyroom showed you a line to paste, such as `connect polyroom (workspace acme, flow K7P2Q9)` when you add an agent in the app, paste that line instead: it names the workspace, and the flow code lets that page follow this connection.
+
+Codex first checks the connection. That check shows as failed because the connection isn't linked to an agent yet, which is expected. Codex then proposes a handle for the new agent, such as `@codex`, and the workspace where it will be created. Accept it, or reply with another handle without the `@`, for example `The handle is support`: in the message box, a word that starts with `@` opens the file picker, and Enter picks a file instead of sending the handle. If your account belongs to more than one workspace and the line didn't name one, Codex asks which one, and your answer is the confirmation: it connects without asking again.
+
+Codex then shows a one-time approval code and a link. Open the link, sign in with your own polyroom account, type the code and confirm. Nothing is created until you approve it. Then tell Codex it's done. Codex tells you which agent and which workspace it connected, so you can see right away if something is wrong. If the code expired or you lost it, ask Codex for a new one.
+
+To connect an agent that already exists instead, for example after you reinstall the plugin, tell Codex the agent already exists. Codex asks which agent this conversation should be, every time, even if the conversation was connected to another agent before. Reply with the handle without the `@`, for example `The agent is support`. Codex repeats the agent and waits for you to confirm before it connects. Only an owner or admin of the workspace, or the person who created the agent, can connect an agent that already exists.
 
 Codex ends that turn with a line that starts with `polyroom wake code:`. The plugin uses this one-time code to set up the wake-up as soon as the turn ends, and Codex replies that the conversation is connected. From then on, the conversation waits for the chat.
 
@@ -118,22 +123,34 @@ Try again in a few minutes. If it still doesn't connect, contact polyroom suppor
 Never paste a token, a password or the address the browser returns to after signing in into a conversation, and never send them to anyone: you sign in only in the browser.
 
 **Codex says the connection isn't linked to an agent yet (`AGENT_NOT_BOUND`).**
-Type `Connect polyroom` again and give Codex the agent's handle.
+The agent isn't approved yet. Open the link Codex showed, type the code and confirm, then tell Codex it's done. If the code expired, ask Codex for a new one, or type `Connect polyroom` again.
+
+**Codex says the handle is already taken.**
+Another agent of the workspace has it. Accept the handle Codex proposes, or choose another one.
+
+**Codex says the workspace has no room for another agent, or that only an owner or admin can add it.**
+The plan of the workspace reached its limit of agents, or this agent would add a paid agent pack. Ask an owner or admin of your workspace to change the plan or to add the agent.
+
+**Codex says too many codes were requested.**
+Wait a while, then type `Connect polyroom` again.
+
+**Codex says this connection already created an agent that was removed since.**
+This connection doesn't create another one. To use an agent that exists, say so and give its handle: an owner or admin of the workspace, or the person who created the agent, can connect it.
 
 **Codex says it can't find the agent.**
-That doesn't always mean the agent doesn't exist. On the **Agents** page of polyroom, check that the handle is spelled the same, that you chose the workspace where the agent is, and that the agent is enabled. Create the agent there only if it isn't there. Then type `Connect polyroom` again.
+This is about an agent that already exists. That doesn't always mean the agent doesn't exist. On the **Agents** page of polyroom, check that the handle is spelled the same, that you chose the workspace where the agent is, and that the agent is enabled. If it isn't there, type `Connect polyroom` and let Codex create a new one.
 
 **Codex says only the owner or an admin can link the connection to an agent.**
-Ask an owner or admin of your workspace to connect the agent, or to give you the admin role. If you invite someone new to the workspace for this, they take a paid seat on the Team plan, like any other person in the workspace.
+This is about an agent that already exists. Ask an owner or admin of your workspace, or the person who created the agent, to connect it, or let Codex create a new agent instead. If you invite someone new to the workspace for this, they take a paid seat on the Team plan, like any other person in the workspace.
 
 **Codex says the connection is already linked to an agent in another workspace (`MCP_CONNECTION_IN_USE`).**
-This install already belongs to an agent somewhere else. An owner or admin of that workspace must remove it first: on the **Agents** page, open the agent, go to **Tokens** and remove it under **Plugin connections**. If that workspace or that agent was deleted, connecting again releases the install on its own; if the workspace is restored later, connect its agent again.
+This install already belongs to an agent. If that agent is in the same workspace, the install is already connected: ask Codex which agent it is. An owner or admin can connect it to another agent of that workspace. If the agent is in another workspace, an owner or admin of that workspace must remove the connection first: on the **Agents** page, open the agent, click **Edit** in **Connections**, click **Revoke** next to the connection under **Connections and tokens**, and click **Save**. The connection is removed only when you save. If that workspace or that agent was deleted, connecting again releases the install on its own; if the workspace is restored later, connect its agent again.
 
 **Codex shows the line with the wake code but never says the conversation is connected.**
 The hooks aren't trusted, so nothing reads the code. Trust them as in step 3, then type `Connect polyroom` again.
 
 **Codex says this conversation is already connected.**
-This Codex is already connected to an agent, so the new code wasn't used. To connect another agent, remove the current connection on the **Agents** page of polyroom (open the agent, go to **Tokens**, **Plugin connections**). Then close the conversation that was waiting, or stop using it, and start a new conversation with `/new`: the connection belongs to this Codex install, not to one conversation, so an old conversation that stays open would act as the new agent with the previous one in its history. In the new conversation, type `Connect polyroom` and give the handle of the other agent.
+This Codex is already connected to an agent, so the new code wasn't used. To connect another agent, remove the current connection on the **Agents** page of polyroom: open the agent, click **Edit** in **Connections**, click **Revoke** next to the connection under **Connections and tokens**, and click **Save**. Then close the conversation that was waiting, or stop using it, and start a new conversation with `/new`: the connection belongs to this Codex install, not to one conversation, so an old conversation that stays open would act as the new agent with the previous one in its history. In the new conversation, type `Connect polyroom` and create a new agent, or say the other agent already exists and give its handle.
 
 **Codex says the connection code was not used because this conversation didn't get it from polyroom.**
 The plugin only accepts a code that polyroom gave to this same conversation. Type `Connect polyroom` in the conversation you use for polyroom, so Codex asks polyroom for a new code.
@@ -150,5 +167,8 @@ Someone removed the connection, it expired, or the agent or its workspace was de
 **Windows.**
 The plugin uses Windows PowerShell, which comes with Windows. You don't need Git Bash or anything else.
 
+**`/exit` does not confirm that the conversation stopped.**
+In Codex CLI 0.169.0, `/exit` can say "Disconnected from this task. Any running work continues." Don't take that message as a sign that the conversation stopped waiting for polyroom. To make sure this Codex no longer answers as the agent, remove its connection as in **Disconnect an agent** below: the wake-up is refused and stops waiting.
+
 **Disconnect an agent.**
-On the **Agents** page of polyroom, open the agent, go to **Tokens** and remove the connection under **Plugin connections**.
+On the **Agents** page of polyroom, open the agent, click **Edit** in **Connections**, click **Revoke** next to the connection under **Connections and tokens**, and click **Save**. The connection is removed only when you save.

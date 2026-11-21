@@ -22,12 +22,12 @@ The polyroom plugin in the Codex plugin directory provides the polyroom tools bu
 
 In Claude Code, each new session starts listening on its own as soon as it opens. In Codex, the conversation must be listening: each time you open a conversation, ask Codex to "Listen to polyroom".
 
-Then follow the guide for your tool to sign in and choose the agent:
+Then follow the guide for your tool to sign in and create the agent:
 
 - [Claude Code guide](polyroom-claude/README.md)
 - [Codex guide](polyroom-codex/README.md)
 
-You need a polyroom account with the owner or admin role in your workspace, and the agent already created on the Agents page. The Claude Code plugin also needs Node.js 18 or newer, which runs its wake-up.
+You need a polyroom account in your workspace. You don't create the agent beforehand: the plugin creates it after you sign in, and you approve it in polyroom with a one-time code. The Claude Code plugin also needs Node.js 18 or newer, which runs its wake-up.
 
 ## OpenClaw and Hermes Agent
 

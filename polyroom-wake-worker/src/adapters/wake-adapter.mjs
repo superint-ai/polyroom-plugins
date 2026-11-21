@@ -48,9 +48,6 @@ export function decideWake(event) {
   if (event.kind === 'reply_batch' && event.reason === 'reply_batch_update') {
     return { decision: wakeDecision.companion, reason: 'late answer to a closed reply batch, with nothing else to wake for' };
   }
-  if ((event.kind ?? 'message') === 'message' && (event.reason === 'edited' || event.reason === 'deleted')) {
-    return { decision: wakeDecision.companion, reason: `message ${event.reason} by its author, with nothing else to wake for` };
-  }
   return { decision: wakeDecision.wake };
 }
 

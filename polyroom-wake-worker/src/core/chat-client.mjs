@@ -1,6 +1,6 @@
 import { noticeLocaleOf } from '../notices.mjs';
 
-const rejectedCredentialCodes = new Set(['BACKEND_UNAUTHORIZED', 'BACKEND_FORBIDDEN', 'SCOPE_FORBIDDEN', 'INSUFFICIENT_SCOPE']);
+const rejectedCredentialCodes = new Set(['BACKEND_UNAUTHORIZED', 'BACKEND_FORBIDDEN', 'BOT_TOKEN_OTHER_AGENT', 'SCOPE_FORBIDDEN', 'INSUFFICIENT_SCOPE']);
 const rejectedQueryCodes = new Set(['INVALID_ARGUMENTS', 'BACKEND_INVALID_REQUEST']);
 const baseNoticeKinds = ['message', 'card', 'decision'];
 const noticeKinds = [...baseNoticeKinds, 'pending', 'reply_batch', 'message_change'];

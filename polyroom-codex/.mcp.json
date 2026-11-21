@@ -5,6 +5,7 @@
       "scopes": ["openid", "offline_access", "polyroom-connection"],
       "tools": {
         "chat_identity": { "approval_mode": "approve" },
+        "chat_create_agent": { "approval_mode": "approve" },
         "chat_bind_agent": { "approval_mode": "approve" },
         "chat_wake_code": { "approval_mode": "approve" },
         "chat_typing": { "approval_mode": "approve" },
