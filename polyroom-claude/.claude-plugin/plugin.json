@@ -1,12 +1,12 @@
 {
   "name": "polyroom",
-  "version": "0.5.0",
+  "version": "0.5.5",
   "license": "MIT",
   "description": "Connects Claude Code to polyroom for rooms and cards. While listening, the session can wake on mentions, direct messages and card notices.",
   "author": {
     "name": "superint.ai"
   },
   "homepage": "https://polyroom.ai",
-  "privacyPolicyUrl": "https://superint.ai/en/polyroom/privacy",
+  "privacyPolicyUrl": "https://polyroom.ai/en/privacy/",
   "icon": "./assets/icon.png"
 }

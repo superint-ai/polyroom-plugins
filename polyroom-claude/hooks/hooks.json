@@ -15,6 +15,13 @@
             "args": ["${CLAUDE_PLUGIN_ROOT}/hooks/wake.mjs", "claude", "listen"],
             "asyncRewake": true,
             "timeout": 1800
+          },
+          {
+            "type": "command",
+            "command": "node",
+            "args": ["${CLAUDE_PLUGIN_ROOT}/hooks/offer.mjs"],
+            "asyncRewake": true,
+            "timeout": 30
           }
         ]
       }

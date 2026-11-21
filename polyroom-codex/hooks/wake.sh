@@ -86,7 +86,7 @@ main() {
   unreachable_text='polyroom could not reach the chat to connect this conversation. Tell the person to check the network, and run the polyroom connect skill again only if they ask.'
   foreign_code_text='The polyroom connection code was not used, because this conversation did not get it from the chat_wake_code tool of polyroom. Tell the person, and run the polyroom connect skill again only if they ask.'
   busy_text='Another polyroom session on this computer already waits for notices for this agent, so this session does not wait. Close the other session, then send any message here so this one waits.'
-  already_connected_text='This conversation is already connected to polyroom, so the new connection code was not used. To connect another agent, the person removes this connection on the Agents page of polyroom, under Tokens and Plugin connections, and then runs the polyroom connect skill again.'
+  already_connected_text='This conversation is already connected to polyroom, so the new connection code was not used. To connect another agent, the person removes this connection on the Agents page of polyroom (open the agent, Edit in Connections, Revoke next to the connection under Connections and tokens, then Save), and then runs the polyroom connect skill again.'
 
   setting() {
     value=$(sed -n "s/^$1=//p" "$config" 2>/dev/null | tail -n 1 | tr -d '\r')
@@ -354,12 +354,32 @@ main() {
     exit 0
   }
 
+  start_mark() {
+    if [ -r "/proc/$1/stat" ]; then
+      set -- $(sed 's/.*) //' "/proc/$1/stat" 2>/dev/null)
+      [ "$#" -ge 20 ] || return 1
+      printf 'start:%s:%s\n' "$(cat /proc/sys/kernel/random/boot_id 2>/dev/null)" "${20}"
+      return 0
+    fi
+    started=$(LC_ALL=C TZ=UTC0 ps -o lstart= -p "$1" 2>/dev/null | sed 's/^ *//; s/ *$//')
+    [ -n "$started" ] || return 1
+    printf 'start:%s\n' "$started"
+  }
+
+  old_record_minutes=$(( (budget + margin + 59) / 60 + 1 ))
+
+  recent_record() {
+    [ -n "$(find "$1" -mmin "-$old_record_minutes" 2>/dev/null)" ]
+  }
+
   read_holder() {
-    holder_pid='' holder_session='' holder_turn=''
+    holder_pid='' holder_session='' holder_turn='' holder_start=''
     if [ -n "$1" ]; then
       [ -f "$lock/$1" ] || return 1
-      { IFS= read -r holder_pid; IFS= read -r holder_session; IFS= read -r holder_turn; } 2>/dev/null < "$lock/$1"
+      holder_path=$lock/$1
+      { IFS= read -r holder_pid; IFS= read -r holder_session; IFS= read -r holder_turn; IFS= read -r holder_start; } 2>/dev/null < "$holder_path"
     else
+      holder_path=$lock/pid
       holder_pid=$(cat "$lock/pid" 2>/dev/null)
       held_by=$(cat "$lock/owner" 2>/dev/null)
       holder_session=${held_by%% *}
@@ -370,7 +390,11 @@ main() {
   }
 
   holder_alive() {
-    [ -n "$holder_pid" ] && [ "$holder_pid" != "$$" ] && kill -0 "$holder_pid" 2>/dev/null
+    [ -n "$holder_pid" ] && [ "$holder_pid" != "$$" ] && kill -0 "$holder_pid" 2>/dev/null || return 1
+    case $holder_start in
+      start:?*) [ "$(start_mark "$holder_pid")" = "$holder_start" ] ;;
+      *) recent_record "$holder_path" ;;
+    esac
   }
 
   await_lock_test() {
@@ -430,7 +454,7 @@ main() {
   fi
   await_lock_test "${top:-0}"
   next=$(( ${top:-0} + 1 ))
-  if ! { printf '%s\n%s\n%s\n' "$$" "$session" "${turn:-$prompt}" > "$staged" && ln "$staged" "$lock/$next"; } 2>/dev/null; then
+  if ! { printf '%s\n%s\n%s\n%s\n' "$$" "$session" "${turn:-$prompt}" "$(start_mark "$$")" > "$staged" && ln "$staged" "$lock/$next"; } 2>/dev/null; then
     rm -f "$staged"
     busy
   fi

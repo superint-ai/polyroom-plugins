@@ -19,7 +19,7 @@ const addressMissingText = 'The polyroom plugin has no chat address in its .mcp.
 const unreachableText = 'polyroom could not reach the chat to connect this conversation. Tell the person to check the network, and run the polyroom connect skill again only if they ask.';
 const foreignCodeText = 'The polyroom connection code was not used, because this conversation did not get it from the chat_wake_code tool of polyroom. Tell the person, and run the polyroom connect skill again only if they ask.';
 const busyText = 'Another polyroom session on this computer already waits for notices for this agent, so this session does not wait. Close the other session, then send any message here so this one waits.';
-const alreadyConnectedText = 'This conversation is already connected to polyroom, so the new connection code was not used. To connect another agent, the person removes this connection on the Agents page of polyroom, under Tokens and Plugin connections, and then runs the polyroom connect skill again.';
+const alreadyConnectedText = 'This conversation is already connected to polyroom, so the new connection code was not used. To connect another agent, the person removes this connection on the Agents page of polyroom (open the agent, Edit in Connections, Revoke next to the connection under Connections and tokens, then Save), and then runs the polyroom connect skill again.';
 
 const unknownCursor = '999999999999999';
 const userAgent = 'polyroom-wake/1';

@@ -41,7 +41,7 @@ $addressMissingText = 'The polyroom plugin has no chat address in its .mcp.json,
 $unreachableText = 'polyroom could not reach the chat to connect this conversation. Tell the person to check the network, and run the polyroom connect skill again only if they ask.'
 $foreignCodeText = 'The polyroom connection code was not used, because this conversation did not get it from the chat_wake_code tool of polyroom. Tell the person, and run the polyroom connect skill again only if they ask.'
 $busyText = 'Another polyroom session on this computer already waits for notices for this agent, so this session does not wait. Close the other session, then send any message here so this one waits.'
-$alreadyConnectedText = 'This conversation is already connected to polyroom, so the new connection code was not used. To connect another agent, the person removes this connection on the Agents page of polyroom, under Tokens and Plugin connections, and then runs the polyroom connect skill again.'
+$alreadyConnectedText = 'This conversation is already connected to polyroom, so the new connection code was not used. To connect another agent, the person removes this connection on the Agents page of polyroom (open the agent, Edit in Connections, Revoke next to the connection under Connections and tokens, then Save), and then runs the polyroom connect skill again.'
 
 function Read-Settings {
   $values = @{}
@@ -113,6 +113,7 @@ $waitSeconds = Number-Setting $settings 'POLYROOM_WAKE_WAIT_SECONDS' 20
 $margin = Number-Setting $settings 'POLYROOM_WAKE_MARGIN_SECONDS' 15
 $retryMin = Number-Setting $settings 'POLYROOM_WAKE_RETRY_MIN_SECONDS' 2
 $retryMax = Number-Setting $settings 'POLYROOM_WAKE_RETRY_MAX_SECONDS' 60
+$startToleranceMs = Number-Setting $settings 'POLYROOM_WAKE_START_TOLERANCE_MS' 100
 $unknownCursor = '999999999999999'
 $userAgent = 'polyroom-wake/1'
 
@@ -322,8 +323,10 @@ function Test-HoldsLock {
 
 function Read-Holder([string]$Name) {
   if ($Name) {
-    try { $lines = @([System.IO.File]::ReadAllText((Join-Path $lock $Name), $utf8) -split "`n") } catch { return $null }
+    $path = Join-Path $lock $Name
+    try { $lines = @([System.IO.File]::ReadAllText($path, $utf8) -split "`n") } catch { return $null }
   } else {
+    $path = Join-Path $lock 'pid'
     $lines = @("$(Read-Number (Join-Path $lock 'pid'))") + @("$(if (Test-Path -LiteralPath (Join-Path $lock 'owner')) { [System.IO.File]::ReadAllText((Join-Path $lock 'owner'), $utf8).Trim() })" -split ' ')
   }
   $holderPid = "$($lines[0])".Trim()
@@ -331,11 +334,32 @@ function Read-Holder([string]$Name) {
     Id = if ($holderPid -match '^\d+$') { [int]$holderPid } else { 0 }
     Session = if ($lines.Count -gt 1) { "$($lines[1])".Trim() } else { '' }
     Turn = if ($lines.Count -gt 2) { "$($lines[2])".Trim() } else { '' }
+    Start = if ($lines.Count -gt 3) { "$($lines[3])".Trim() } else { '' }
+    Path = $path
   }
 }
 
 function Get-LiveProcess([int]$Id) {
   if ($Id -gt 0 -and $Id -ne $PID) { Get-Process -Id $Id -ErrorAction SilentlyContinue } else { $null }
+}
+
+function Get-StartTicks($Process) {
+  try { $started = $Process.StartTime } catch { $started = $null }
+  if ($null -eq $started) { return $null }
+  $started.ToUniversalTime().Ticks
+}
+
+function Test-Holding($Holder) {
+  if (-not $Holder) { return $false }
+  $process = Get-LiveProcess $Holder.Id
+  if (-not $process) { return $false }
+  if ($Holder.Start -like 'start:?*') {
+    $current = Get-StartTicks $process
+    $held = 0L
+    return $null -ne $current -and [long]::TryParse($Holder.Start.Substring(6), [ref]$held) -and [Math]::Abs($held - $current) -le $startToleranceMs * 10000L
+  }
+  try { $written = [System.IO.File]::GetLastWriteTimeUtc($Holder.Path) } catch { return $false }
+  ([DateTime]::UtcNow - $written).TotalSeconds -le ($budget + $margin)
 }
 
 function Wait-LockTest([string]$Seen) {
@@ -349,10 +373,10 @@ function Get-EarlierHolders {
   $ids = @()
   foreach ($name in @(Get-ChildItem -LiteralPath $lock -Name -File -Force -ErrorAction SilentlyContinue | Where-Object { $_ -match '^\d+$' -and [long]$_ -lt [long]$script:record })) {
     $old = Read-Holder $name
-    if ($old -and (Get-LiveProcess $old.Id)) { $ids += $old.Id }
+    if (Test-Holding $old) { $ids += $old.Id }
   }
   $legacy = Read-Holder ''
-  if (Get-LiveProcess $legacy.Id) { $ids += $legacy.Id }
+  if (Test-Holding $legacy) { $ids += $legacy.Id }
   , $ids
 }
 
@@ -369,11 +393,11 @@ function Clear-OldRecords {
       if (-not (Get-LiveProcess ([int]$Matches[1]))) { Remove-Item -LiteralPath $path -Force -ErrorAction SilentlyContinue }
     } elseif ($name -match '^\d+$' -and [long]$name -lt [long]$script:record) {
       $old = Read-Holder $name
-      if (-not $old -or -not (Get-LiveProcess $old.Id)) { Remove-Item -LiteralPath $path -Force -ErrorAction SilentlyContinue }
+      if (-not (Test-Holding $old)) { Remove-Item -LiteralPath $path -Force -ErrorAction SilentlyContinue }
     }
   }
   $legacy = Read-Holder ''
-  if (-not (Get-LiveProcess $legacy.Id)) {
+  if (-not (Test-Holding $legacy)) {
     Remove-Item -LiteralPath (Join-Path $lock 'pid'), (Join-Path $lock 'owner') -Force -ErrorAction SilentlyContinue
   }
 }
@@ -383,13 +407,14 @@ try {
   $top = Get-TopRecord
   $holder = Read-Holder $top
   if (-not $holder) { Exit-Busy }
-  $holderProcess = Get-LiveProcess $holder.Id
-  if ($holderProcess -and (-not $session -or $holder.Session -ne $session -or $holder.Turn -eq $ownTurn)) { Exit-Busy }
+  if ((Test-Holding $holder) -and (-not $session -or $holder.Session -ne $session -or $holder.Turn -eq $ownTurn)) { Exit-Busy }
   $topNumber = if ($top) { [long]$top } else { [long]0 }
   Wait-LockTest "$topNumber"
   $next = "$($topNumber + 1)"
   try {
-    [System.IO.File]::WriteAllText($staged, "$PID`n$session`n$ownTurn`n", $utf8)
+    $ownStart = Get-StartTicks (Get-Process -Id $PID)
+    $ownMark = if ($null -ne $ownStart) { "start:$ownStart" } else { '' }
+    [System.IO.File]::WriteAllText($staged, "$PID`n$session`n$ownTurn`n$ownMark`n", $utf8)
     [System.IO.File]::Move($staged, (Join-Path $lock $next))
   } catch {
     Remove-Item -LiteralPath $staged -Force -ErrorAction SilentlyContinue
