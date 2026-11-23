@@ -131,14 +131,44 @@ class UsageCheckTest(unittest.TestCase):
         self.assertEqual(calls[0], calls[1])
         self.assertEqual(len(stored), 1)
 
-    def test_a_new_crossing_after_the_alert_cleared_is_a_new_message(self):
+    def test_a_pending_alert_is_sent_as_it_was_even_after_it_cleared_and_a_new_crossing_is_a_new_message(self):
         calls, stored = self.post_with_lost_answers({1})
         for tokens, offset in ((450_000, 0), (350_000, 900), (450_000, 1800)):
-            self.capture(context_tokens=tokens)
+            self.capture(context_tokens=tokens, captured_at=NOW + offset)
             self.check(*POSTING, now=NOW + offset)
-        self.assertEqual(len(calls), 2)
-        self.assertNotEqual(calls[0][0], calls[1][0])
+        self.assertEqual(len(calls), 3)
+        self.assertEqual(calls[1], calls[0])
+        self.assertNotEqual(calls[2][0], calls[0][0])
         self.assertEqual(len(stored), 2)
+
+    def test_a_new_alert_during_a_retry_keeps_the_pending_message_and_goes_out_on_its_own(self):
+        calls, stored = self.post_with_lost_answers({1})
+        self.capture(context_tokens=450_000)
+        codes = [self.check(*POSTING)]
+        self.capture(context_tokens=450_000, week=75.0, captured_at=NOW + 900)
+        codes.append(self.check(*POSTING, now=NOW + 900))
+        codes.append(self.check(*POSTING, now=NOW + 900))
+        self.assertEqual(codes, [1, 2, 0])
+        self.assertEqual(len(calls), 3)
+        self.assertEqual(calls[1], calls[0])
+        self.assertEqual(len(stored), 2)
+        self.assertIn('a semana passou de 70%', calls[2][1])
+        self.assertNotIn('o contexto da sessão passou', calls[2][1])
+
+    def test_a_retry_while_the_reading_is_unavailable_keeps_the_pending_message_and_its_alert(self):
+        calls, stored = self.post_with_lost_answers({1})
+        self.capture(context_tokens=450_000)
+        self.check(*POSTING)
+        self.capture(context_tokens=450_000, captured_at=NOW + 900 - 86_400)
+        self.check(*POSTING, now=NOW + 900)
+        self.assertEqual(calls[1], calls[0])
+        self.assertIn('context>=400000:s1', self.last()['activeAlerts'])
+        self.capture(context_tokens=450_000, captured_at=NOW + 1800)
+        self.check(*POSTING, now=NOW + 1800)
+        self.assertEqual(len(calls), 3)
+        self.assertEqual(len(stored), 2)
+        self.assertIn('a última leitura do statusLine', calls[2][1])
+        self.assertEqual(self.last()['newAlerts'], [])
 
 
 if __name__ == '__main__':

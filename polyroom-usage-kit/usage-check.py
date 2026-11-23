@@ -293,7 +293,9 @@ def main():
     now = time.time()
     state = read_json(ALERT_STATE_FILE, {})
     previous = set(state.get('active', []))
-    record, active, superseded = evaluate(arguments, now, previous, read_history())
+    pending = state.get('pending') if arguments.room else None
+    pending_keys = set(pending.get('keys', [])) if pending else set()
+    record, active, superseded = evaluate(arguments, now, previous | pending_keys, read_history())
     new_keys = [key for key in sorted(active) if key not in previous]
     shown = [key for key in new_keys if key not in superseded]
     print(summary_line(record, shown))
@@ -304,20 +306,23 @@ def main():
 
     exit_code = EXIT_NEW_ALERT if new_keys else EXIT_OK
     kept = set(active) - set(new_keys)
-    pending = state.get('pending')
-    if not (pending and new_keys and pending.get('keys') == new_keys):
-        pending = None
-    if shown and arguments.room:
+    fresh = [key for key in shown if key not in pending_keys]
+    record['postedMessageIds'] = []
+    if arguments.room and (pending or fresh):
         try:
             session = mcp_session(arguments.mcp_server)
-            if pending is None:
+            if pending:
+                record['postedMessageIds'].append(post_alert(session, arguments, pending['content'], pending['clientId']))
+                kept |= pending_keys & set(active)
+                pending = None
+            if fresh:
                 record['handle'] = bot_handle(session)
-                pending = {'keys': new_keys, 'content': alert_content(record, active, shown, now), 'clientId': f'usage-check-{uuid.uuid4().hex[:24]}'}
+                pending = {'keys': fresh, 'content': alert_content(record, active, fresh, now), 'clientId': f'usage-check-{uuid.uuid4().hex[:24]}'}
                 save_state(kept, pending, record['at'])
-            record['postedMessageId'] = post_alert(session, arguments, pending['content'], pending['clientId'])
+                record['postedMessageIds'].append(post_alert(session, arguments, pending['content'], pending['clientId']))
+                pending = None
             kept |= set(new_keys)
-            pending = None
-            print(f"  posted message {record['postedMessageId']}")
+            print(f"  posted messages {', '.join(map(str, record['postedMessageIds']))}")
         except Exception as error:
             record['postError'] = f'{type(error).__name__}: {error}'[:500]
             print(f"  post failed, will retry next run: {record['postError']}")
