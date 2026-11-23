@@ -171,5 +171,27 @@ class UsageCheckTest(unittest.TestCase):
         self.assertEqual(self.last()['newAlerts'], [])
 
 
+    def test_a_lost_answer_after_a_jump_covers_the_lower_level_too(self):
+        calls, stored = self.post_with_lost_answers({1})
+        for tokens, offset in ((650_000, 0), (450_000, 900), (350_000, 1800), (450_000, 2700)):
+            self.capture(context_tokens=tokens, captured_at=NOW + offset)
+            self.check(*POSTING, now=NOW + offset)
+        self.assertEqual(len(calls), 3)
+        self.assertEqual(calls[1], calls[0])
+        self.assertIn('600 mil', calls[0][1])
+        self.assertIn('400 mil', calls[2][1])
+        self.assertNotEqual(calls[2][0], calls[0][0])
+        self.assertEqual(len(stored), 2)
+
+    def test_a_tool_result_is_read_from_its_structured_content_or_its_first_json_part(self):
+        notice = {'type': 'text', 'text': 'MCP reload needed: this MCP server now runs a newer release.'}
+        for result in (
+            {'content': [{'type': 'text', 'text': json.dumps({'message': {'id': 41}})}, notice]},
+            {'content': [{'type': 'text', 'text': '{"other": 1}'}, notice], 'structuredContent': {'message': {'id': 41}}},
+        ):
+            with self.subTest(result=result), mock.patch.object(self.module, 'mcp_post', return_value=({'jsonrpc': '2.0', 'id': 3, 'result': result}, None)):
+                self.assertEqual(self.module.post_alert(('url', {}, 'session'), mock.Mock(room=ROOM, mention_person=[], mention_handle=['bot']), 'text', 'usage-check-id'), 41)
+
+
 if __name__ == '__main__':
     unittest.main()

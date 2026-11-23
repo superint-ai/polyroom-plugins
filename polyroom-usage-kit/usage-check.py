@@ -242,8 +242,13 @@ def mcp_tool(session, request_id, name, tool_arguments):
     result = (reply or {}).get('result') or {}
     if not reply or reply.get('error') or result.get('isError'):
         raise RuntimeError(f'{name} failed: {json.dumps(reply)[:500]}')
-    text = ''.join(part.get('text', '') for part in result.get('content') or [])
-    return json.loads(text) if text.strip().startswith('{') else {}
+    if isinstance(result.get('structuredContent'), dict):
+        return result['structuredContent']
+    for part in result.get('content') or []:
+        text = (part.get('text') or '').lstrip()
+        if text.startswith('{'):
+            return json.JSONDecoder().raw_decode(text)[0]
+    return {}
 
 
 def bot_handle(session):
@@ -306,6 +311,7 @@ def main():
 
     exit_code = EXIT_NEW_ALERT if new_keys else EXIT_OK
     kept = set(active) - set(new_keys)
+    fresh_keys = [key for key in new_keys if key not in pending_keys]
     fresh = [key for key in shown if key not in pending_keys]
     record['postedMessageIds'] = []
     if arguments.room and (pending or fresh):
@@ -317,7 +323,7 @@ def main():
                 pending = None
             if fresh:
                 record['handle'] = bot_handle(session)
-                pending = {'keys': fresh, 'content': alert_content(record, active, fresh, now), 'clientId': f'usage-check-{uuid.uuid4().hex[:24]}'}
+                pending = {'keys': fresh_keys, 'content': alert_content(record, active, fresh, now), 'clientId': f'usage-check-{uuid.uuid4().hex[:24]}'}
                 save_state(kept, pending, record['at'])
                 record['postedMessageIds'].append(post_alert(session, arguments, pending['content'], pending['clientId']))
                 pending = None
