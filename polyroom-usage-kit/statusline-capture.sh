@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 payload=$(cat)
 state_dir="$HOME/.claude-monitor/context"
-monitor="${CLAUDE_MONITOR_BIN:-/opt/claude-monitor-venv/bin/claude-monitor}"
 {
   mkdir -p "$state_dir" &&
   session_id=$(printf '%s' "$payload" | jq -r '.session_id // empty') &&
@@ -10,4 +9,4 @@ monitor="${CLAUDE_MONITOR_BIN:-/opt/claude-monitor-venv/bin/claude-monitor}"
   mv -f "$state_dir/$session_id.json.tmp" "$state_dir/$session_id.json" &&
   cp -f "$state_dir/$session_id.json" "$state_dir/latest.json"
 } >/dev/null 2>&1
-printf '%s' "$payload" | "$monitor" --statusline
+printf '%s' "$payload" | "$(dirname "$0")/claude-monitor" --statusline

@@ -137,7 +137,10 @@ if arguments.buckets:
         size = context[label]
         if size['calls']:
             print(f"{label:>9} calls {int(size['calls']):6d} ({100 * size['calls'] / count:4.1f}%)  cost {size['cost']:8.0f} ({100 * size['cost'] / total:4.1f}%)  per call {size['cost'] / size['calls']:.3f}  avg ctx {size['prompt'] / size['calls'] / 1000:.0f}k")
-    print('total', round(total), 'calls', int(count))
+    print('total', round(total), 'priced calls', int(count))
+    unpriced_calls = sum(unpriced.values())
+    if unpriced_calls:
+        print(f"unpriced calls {unpriced_calls} ({', '.join(f'{model} {number}' for model, number in sorted(unpriced.items()))}): no price in the table, so the total leaves them out")
     sys.exit(0)
 
 rows = []
