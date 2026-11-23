@@ -39,6 +39,7 @@ OpenClaw and Hermes Agent connect with the server URL and an agent token, as the
 - `.agents/plugins/marketplace.json`: the Codex marketplace.
 - `polyroom-claude/` and `polyroom-codex/`: the plugins. Both connect to https://mcp.polyroom.ai/mcp.
 - `polyroom-wake-worker/`: the worker that wakes OpenClaw and Hermes Agent on each polyroom notice.
+- `polyroom-usage-kit/`: scripts that watch the context, the plan limits and the cost of a Claude Code machine and post an alert to a polyroom room when a limit crosses a threshold. See its [guide](polyroom-usage-kit/README.md).
 
 ## Support
 
