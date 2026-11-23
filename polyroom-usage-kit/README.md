@@ -59,6 +59,7 @@ The first context reading appears after the next Claude Code turn on the machine
 - A failed post is retried on the next run with the same message id and the same text, so the room gets one message even when the server saved the first try and its answer was lost. The retry goes out first and as it was, even when its alert cleared or new alerts appeared in the meantime; the new alerts go in a message of their own. A new crossing after the alert cleared is a new message.
 - A reading older than `--capture-max-age-minutes` (default 360) is not current: a stale status line capture alerts once and its context is not used, and a stale claude-monitor reading gives no limit. The alerts that were active stay active, without a new post, until a current reading arrives.
 - When the history is too short to project the week, the projection alert keeps its previous state.
+- Once raised, the pace alert stays until the lead over the linear pace falls 5 points below the margin, and the projection alert until the projected week falls 5 points below its level (`--week-pace-hysteresis`, `--week-projection-hysteresis`), so a value that hovers around the line posts once.
 
 It alerts when:
 

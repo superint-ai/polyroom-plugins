@@ -88,6 +88,17 @@ class UsageCheckTest(unittest.TestCase):
         self.check(now=NOW + 1800)
         self.assertEqual(self.last()['newAlerts'], [])
 
+    def test_a_pace_alert_clears_only_after_the_week_falls_below_the_margin_minus_the_hysteresis(self):
+        pace = f'week-pace:{WEEK_RESET}'
+        shown, active = [], []
+        for week in (72.5, 71.5, 72.5, 66.5, 72.5):
+            self.capture(week=week, week_reset=WEEK_RESET)
+            self.check('--week-levels', '99', '--week-projection-level', '1000')
+            shown.append(pace in self.last()['newAlerts'])
+            active.append(pace in self.last()['activeAlerts'])
+        self.assertEqual(shown, [True, False, False, False, True])
+        self.assertEqual(active, [True, True, True, False, True])
+
     def seed_history(self, *samples):
         self.state.mkdir(parents=True, exist_ok=True)
         lines = [json.dumps({'at': datetime.fromtimestamp(at, timezone.utc).isoformat(timespec='seconds'), 'weekResetsAt': WEEK_RESET, 'weekPercent': percent}) for at, percent in samples]

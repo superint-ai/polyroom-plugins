@@ -35,6 +35,7 @@ def parse_arguments():
     parser.add_argument('--five-hour-levels', default='80,95')
     parser.add_argument('--week-levels', default='70,85,95')
     parser.add_argument('--week-pace-margin', type=float, default=15.0)
+    parser.add_argument('--week-pace-hysteresis', type=float, default=5.0)
     parser.add_argument('--week-projection-level', type=float, default=90.0)
     parser.add_argument('--week-projection-window-hours', type=float, default=6.0)
     parser.add_argument('--week-projection-hysteresis', type=float, default=5.0)
@@ -153,8 +154,10 @@ def evaluate(arguments, now, previous, history):
     superseded += add_levels(active, 'week>=', week_reset, week_used, levels(arguments.week_levels), lambda level: (
         f'a semana passou de {level:g}% (agora {week_used:g}%, ritmo linear {week_elapsed:g}%, renova {brt_text(week_reset)} BRT). '
         'Ação: menos turnos, ou passar trabalho para outra conta; trocar de modelo não ajuda.'))
-    if week_used is not None and week_elapsed is not None and week_used >= week_elapsed + arguments.week_pace_margin:
-        active[f'week-pace:{week_reset}'] = (
+    pace_key = f'week-pace:{week_reset}'
+    pace_floor = arguments.week_pace_margin - (arguments.week_pace_hysteresis if pace_key in previous else 0)
+    if week_used is not None and week_elapsed is not None and week_used >= week_elapsed + pace_floor:
+        active[pace_key] = (
             f'a semana está à frente do ritmo: {week_used:g}% usados com {week_elapsed:g}% do tempo passado (margem {arguments.week_pace_margin:g} pontos). Ação: menos turnos.')
     week_rate, week_projected = week_projection(history, now, week_used, week_reset, arguments.week_projection_window_hours)
     projection_key = f'week-projection>={arguments.week_projection_level:g}:{week_reset}'
