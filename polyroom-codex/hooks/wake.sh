@@ -11,6 +11,30 @@ main() {
     *) printf '%s\n' 'usage: wake.sh codex|claude wait|session-start|claim' >&2; exit 64 ;;
   esac
 
+  app_url=${POLYROOM_WAKE_URL:-}
+  app_token=${POLYROOM_WAKE_TOKEN:-}
+  app_mode=''
+  if [ -n "$app_url$app_token" ]; then
+    if [ "$action" = claim ]; then
+      printf '%s\n' 'This session was opened by the polyroom app, which already connected it, so it takes no connection code.' >&2
+      exit 1
+    fi
+    [ -n "${POLYROOM_WAKE_DIR:-}" ] || exit 0
+    case "$app_url" in
+      *[?#@[:space:][:cntrl:]]*) exit 0 ;;
+      https://[!/]*|http://127.0.0.1|http://127.0.0.1[:/]*) ;;
+      *) exit 0 ;;
+    esac
+    case "$app_token" in
+      saw_*) ;;
+      *) exit 0 ;;
+    esac
+    case "${app_token#saw_}" in
+      ''|*[!A-Za-z0-9_-]*) exit 0 ;;
+    esac
+    app_mode=1
+  fi
+
   if [ -n "${POLYROOM_WAKE_DIR:-}" ]; then
     dir=$POLYROOM_WAKE_DIR
   elif [ "$product" = codex ]; then
@@ -80,6 +104,8 @@ main() {
   server_url=$(printf '%s\n' "$server_entry" | sed -n 2p)
   idle_text='No new polyroom notices. Call the polyroom tool chat_identity once so this session keeps waiting, then end the turn with one word.'
   refused_text='The chat refused the polyroom wake token, so this session stopped waiting for notices: the connection was removed or expired, or the agent or its workspace was deleted. Tell the person in one sentence, and say they can type Connect polyroom to connect again.'
+  app_code_text='This conversation was opened by the polyroom app, which already connected it, so the connection code was not used. Tell the person in one sentence that it is already connected, then end the turn.'
+  app_refused_text='The chat refused the polyroom wake token, so this session stopped waiting for notices: the connection was removed or expired, or the agent or its workspace was deleted. Tell the person in one sentence, and say they can connect this agent again in the polyroom app.'
   connected_text='polyroom connected this conversation, and it now waits for notices. Tell the person in one short sentence that it is connected, then end the turn.'
   code_refused_text='The chat refused the polyroom connection code, so this conversation is not connected. Tell the person, and run the polyroom connect skill again only if they ask.'
   address_missing_text='The polyroom plugin has no chat address in its .mcp.json, so this conversation is not connected. Tell the person to reinstall the polyroom plugin.'
@@ -116,6 +142,7 @@ main() {
     read -r saved_mark saved_number saved_turn < "$1" || [ -n "$saved_mark" ] || return 1
     if [ -z "$saved_number" ]; then
       is_number "$saved_mark" || return 1
+      [ -z "$app_mode" ] || return 2
       printf '%s' "$saved_mark"
     elif [ "$saved_mark" = "$(token_mark)" ] && is_number "$saved_number"; then
       printf '%s' "$saved_number"
@@ -140,7 +167,7 @@ main() {
   }
 
   connected_as_before() {
-    [ "$(setting POLYROOM_WAKE_TOKEN '')" = "$token" ]
+    [ -n "$app_mode" ] || [ "$(setting POLYROOM_WAKE_TOKEN '')" = "$token" ]
   }
 
   is_number() {
@@ -150,10 +177,16 @@ main() {
     esac
   }
 
-  url=$(setting POLYROOM_WAKE_URL '')
+  if [ -n "$app_mode" ]; then
+    url=$app_url
+    token=$app_token
+    code=''
+  else
+    url=$(setting POLYROOM_WAKE_URL '')
+    token=$(setting POLYROOM_WAKE_TOKEN '')
+    code=$(setting POLYROOM_WAKE_CODE '')
+  fi
   url=${url%/}
-  token=$(setting POLYROOM_WAKE_TOKEN '')
-  code=$(setting POLYROOM_WAKE_CODE '')
   budget=$(number_setting POLYROOM_WAKE_BUDGET_SECONDS 1740)
   wait_seconds=$(number_setting POLYROOM_WAKE_WAIT_SECONDS 20)
   margin=$(number_setting POLYROOM_WAKE_MARGIN_SECONDS 15)
@@ -162,7 +195,6 @@ main() {
   unknown_cursor=999999999999999
   body=$dir/.body.$$
   headers=$dir/.headers.$$
-  auth=$dir/.auth.$$
   answer=$dir/.status.$$
   lock=$dir/wake.lock
   staged=$lock/.new.$$
@@ -192,7 +224,7 @@ main() {
       kill -s KILL "$child" 2>/dev/null
       wait "$child" 2>/dev/null
     fi
-    rm -f "$body" "$headers" "$auth" "$answer" "$config.$$.tmp" "$staged"
+    rm -f "$body" "$headers" "$answer" "$config.$$.tmp" "$staged"
     release_lock
   }
   trap cleanup EXIT
@@ -256,11 +288,68 @@ main() {
     exit 2
   }
 
+  wake_code_call() {
+    awk -v server="$1" -v code="$2" '
+      function closed() { if (depth == 0) state[0] = "end"; else state[depth] = "next" }
+      function at_value() { return state[depth] == "value" || (kind[depth] == "[" && state[depth] == "first") }
+      function path(   p, j) { p = key[1]; for (j = 2; j <= depth; j++) p = p "\034" key[j]; return p }
+      function at(dotted) { gsub(/\./, "\034", dotted); return value[dotted] }
+      function holds(text,   n, i, c, e, s, ended, rest) {
+        split("", value); split("", key); n = length(text); depth = 0; state[0] = "value"; kind[0] = ""
+        for (i = 1; i <= n; i++) {
+          c = substr(text, i, 1)
+          if (c == " " || c == "\t" || c == "\r") continue
+          if (state[depth] == "end") return 0
+          if (c == "\"") {
+            s = ""; ended = 0
+            for (i++; i <= n; i++) {
+              c = substr(text, i, 1)
+              if (c == "\"") { ended = 1; break }
+              if (c ~ /[\001-\037]/) break
+              if (c == "\\") {
+                e = substr(text, i + 1, 1)
+                if (e == "u") { if (substr(text, i + 2, 4) !~ /^[0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f]$/) break; s = s "\\u" substr(text, i + 2, 4); i += 5; continue }
+                if (index("\"\\/bfnrt", e) == 0 || e == "") break
+                s = s c e; i++; continue
+              }
+              s = s c
+            }
+            if (!ended) return 0
+            if (kind[depth] == "{" && (state[depth] == "first" || state[depth] == "key")) { key[depth] = s; state[depth] = "colon"; continue }
+            if (!at_value()) return 0
+            value[path()] = "s" s; closed(); continue
+          }
+          if (c == "{" || c == "[") {
+            if (!at_value()) return 0
+            depth++; kind[depth] = c; state[depth] = "first"; key[depth] = (c == "[") ? "#" : ""
+            continue
+          }
+          if (c == "}" || c == "]") {
+            if (depth == 0 || (c == "}") != (kind[depth] == "{") || (state[depth] != "next" && state[depth] != "first")) return 0
+            depth--; closed(); continue
+          }
+          if (c == ":") { if (state[depth] != "colon") return 0; state[depth] = "value"; continue }
+          if (c == ",") { if (state[depth] != "next") return 0; state[depth] = (kind[depth] == "{") ? "key" : "value"; continue }
+          if (!at_value()) return 0
+          rest = substr(text, i)
+          if (match(rest, /^-?(0|[1-9][0-9]*)(\.[0-9]+)?([eE][+-]?[0-9]+)?/)) { i += RLENGTH - 1; value[path()] = "n"; closed(); continue }
+          if (substr(rest, 1, 4) == "true" || substr(rest, 1, 4) == "null") { value[path()] = "l" substr(rest, 1, 4); i += 3; closed(); continue }
+          if (substr(rest, 1, 5) == "false") { value[path()] = "lfalse"; i += 4; closed(); continue }
+          return 0
+        }
+        return state[0] == "end" && at("type") == "sevent_msg" && at("payload.type") == "sitem_completed" && at("payload.item.type") == "sMcpToolCall" \
+          && at("payload.item.server") == "s" server && at("payload.item.tool") == "schat_wake_code" && at("payload.item.status") == "scompleted" \
+          && at("payload.item.result.isError") != "ltrue" && at("payload.item.result.structuredContent.code") == "s" code
+      }
+      holds($0) { found = 1 }
+      END { exit !found }'
+  }
+
   issued_here() {
     [ -n "$transcript" ] && [ -f "$transcript" ] || return 1
     tries=0
     while :; do
-      grep -F "\"server\":\"$server_name\",\"tool\":\"chat_wake_code\"" "$transcript" 2>/dev/null | grep -F -q "\"structuredContent\":{\"code\":\"$offered\"" && return 0
+      grep -F "$offered" "$transcript" 2>/dev/null | wake_code_call "$server_name" "$offered" && return 0
       tries=$((tries + 1))
       [ "$tries" -lt 5 ] || return 1
       pause 1
@@ -298,7 +387,22 @@ main() {
   session=$(stop_field session_id)
   turn=$(stop_field turn_id)
   prompt=$(stop_field prompt_id)
-  [ "$product:$action" != codex:wait ] || connect_from_stop
+  app_code_offered() {
+    [ -n "$stop_input" ] || return 1
+    if [ -n "$server_name" ]; then
+      printf '%s' "$stop_input" | grep -q "$server_name"' wake code: `\{0,1\}swc_[A-Za-z0-9_-]\{43\}`\{0,1\}\(\\n\)\{0,1\}"'
+    else
+      printf '%s' "$stop_input" | grep -q ' wake code: `\{0,1\}swc_[A-Za-z0-9_-]\{43\}'
+    fi
+  }
+
+  if [ "$product:$action" = codex:wait ]; then
+    if [ -z "$app_mode" ]; then
+      connect_from_stop
+    elif app_code_offered; then
+      deliver_text "$app_code_text"
+    fi
+  fi
 
   [ -d "$dir" ] || exit 0
   [ -n "$url" ] || exit 0
@@ -309,26 +413,30 @@ main() {
     exit 0
   fi
 
-  [ ! -f "$dir/stopped" ] || exit 0
+  if [ -n "$app_mode" ]; then
+    ! marked_number "$dir/stopped" > /dev/null || exit 0
+  else
+    [ ! -f "$dir/stopped" ] || exit 0
+  fi
   if [ -z "$token" ]; then
     [ -n "$code" ] || exit 0
     claim || exit 0
   fi
-  printf 'Authorization: Bearer %s\n' "$token" > "$auth"
 
   read_cursor() {
     cursor=$(marked_number "$dir/cursor")
     case $? in
       0) ;;
       2) cursor=$unknown_cursor ;;
-      *) cursor=0 ;;
+      *) cursor=0
+        [ -z "$app_mode" ] || cursor=$unknown_cursor ;;
     esac
   }
   read_cursor
 
   request() {
-    curl -s -o "$body" -D "$headers" -w '%{http_code}' --max-time "$2" \
-      -H "@$auth" -H 'User-Agent: polyroom-wake/1' "$url/wake?$1" > "$answer" &
+    printf 'Authorization: Bearer %s\n' "$token" | curl -s -o "$body" -D "$headers" -w '%{http_code}' --max-time "$2" \
+      -H @- -H 'User-Agent: polyroom-wake/1' "$url/wake?$1" > "$answer" &
     await_child && status=$(cat "$answer" 2>/dev/null) || status=000
     next=$(tr -d '\r' < "$headers" 2>/dev/null | sed -n 's/^[Xx]-[Pp][Oo][Ll][Yy][Rr][Oo][Oo][Mm]-[Cc][Uu][Rr][Ss][Oo][Rr]: *//p' | tail -n 1)
   }
@@ -373,11 +481,11 @@ main() {
   }
 
   read_holder() {
-    holder_pid='' holder_session='' holder_turn='' holder_start=''
+    holder_pid='' holder_session='' holder_turn='' holder_start='' holder_connection=''
     if [ -n "$1" ]; then
       [ -f "$lock/$1" ] || return 1
       holder_path=$lock/$1
-      { IFS= read -r holder_pid; IFS= read -r holder_session; IFS= read -r holder_turn; IFS= read -r holder_start; } 2>/dev/null < "$holder_path"
+      { IFS= read -r holder_pid; IFS= read -r holder_session; IFS= read -r holder_turn; IFS= read -r holder_start; IFS= read -r holder_connection; } 2>/dev/null < "$holder_path"
     else
       holder_path=$lock/pid
       holder_pid=$(cat "$lock/pid" 2>/dev/null)
@@ -395,6 +503,10 @@ main() {
       start:?*) [ "$(start_mark "$holder_pid")" = "$holder_start" ] ;;
       *) recent_record "$holder_path" ;;
     esac
+  }
+
+  holder_replaced() {
+    [ -z "$app_mode" ] && [ -n "$holder_connection" ] && [ "$holder_connection" != "$(token_mark)" ] && connected_as_before
   }
 
   await_lock_test() {
@@ -449,12 +561,12 @@ main() {
   mkdir -p "$lock" 2>/dev/null
   top=$(top_record)
   read_holder "$top" || busy
-  if holder_alive; then
+  if holder_alive && ! holder_replaced; then
     [ -n "$session" ] && [ "$holder_session" = "$session" ] && [ "$holder_turn" != "${turn:-$prompt}" ] || busy
   fi
   await_lock_test "${top:-0}"
   next=$(( ${top:-0} + 1 ))
-  if ! { printf '%s\n%s\n%s\n%s\n' "$$" "$session" "${turn:-$prompt}" "$(start_mark "$$")" > "$staged" && ln "$staged" "$lock/$next"; } 2>/dev/null; then
+  if ! { printf '%s\n%s\n%s\n%s\n%s\n' "$$" "$session" "${turn:-$prompt}" "$(start_mark "$$")" "$(token_mark)" > "$staged" && ln "$staged" "$lock/$next"; } 2>/dev/null; then
     rm -f "$staged"
     busy
   fi
@@ -509,6 +621,10 @@ main() {
         backoff=$retry_min
         continue ;;
       401|403)
+        if [ -n "$app_mode" ]; then
+          save_marked "$dir/stopped" 0
+          deliver_text "$app_refused_text"
+        fi
         : > "$dir/stopped"
         deliver_text "$refused_text" ;;
     esac

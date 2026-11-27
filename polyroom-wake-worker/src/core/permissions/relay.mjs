@@ -69,7 +69,7 @@ function createRuleStore(dataDirectory, botId) {
   };
 }
 
-export function createPermissionRelay({ config, client, botId, handle, locale, dataDirectory, projectDir, sessionId, clock, log, origin, notify, wake }) {
+export function createPermissionRelay({ config, client, botId, handle, locale, dataDirectory, projectDir, sessionId, clock, log, origin, notify, wake, mask }) {
   const texts = permissionTexts(locale);
   const open = new Map();
   const answered = new Map();
@@ -81,6 +81,9 @@ export function createPermissionRelay({ config, client, botId, handle, locale, d
   const roomKey = (roomId, messageId) => `${roomId}:${messageId}`;
   const ruleKey = ({ rule, projectDir }) => `${projectDir}\n${rule}`;
   const warn = (what) => (error) => log(`permission relay: ${what}: ${error.message}`);
+  const shown = (text, max) => truncate(mask.secrets(String(text ?? '')), max);
+  const literal = (text) => mask.literal(String(text ?? ''));
+  const hidesCode = 'a secret-looking value in its text is not a plain token, so masking it could hide code from the approver';
 
   function remember(key, approvers) {
     answered.set(key, approvers);
@@ -274,8 +277,13 @@ export function createPermissionRelay({ config, client, botId, handle, locale, d
         log(`permission relay: ${requestId} stays in the terminal: its input is longer than POLYROOM_PERMISSION_PREVIEW_MAX_CHARS or came cut by Claude Code`);
         return;
       }
-      const content = texts.relay({ bot: handle, tool: truncate(params.tool_name, 200), description: truncate(params.description, config.previewMaxChars),
-        preview: truncate(params.input_preview, config.previewMaxChars), requestId, timeoutMs: config.timeoutMs });
+      const description = literal(params.description), preview = literal(params.input_preview);
+      if (description === null || preview === null) { log(`permission relay: ${requestId} stays in the terminal: ${hidesCode}`); return; }
+      if (!fitsWhole(description, config.previewMaxChars) || !fitsWhole(preview, config.previewMaxChars)) {
+        log(`permission relay: ${requestId} stays in the terminal: its masked text is longer than POLYROOM_PERMISSION_PREVIEW_MAX_CHARS`);
+        return;
+      }
+      const content = texts.relay({ bot: handle, tool: shown(params.tool_name, 200), description, preview, requestId, timeoutMs: config.timeoutMs });
       await openRequest({ key: requestId, kind: 'relay', label: requestId, content, extra: { requestId } })
         .catch(warn(`cannot post request ${requestId}`));
     },
@@ -283,7 +291,7 @@ export function createPermissionRelay({ config, client, botId, handle, locale, d
       const toolName = String(entry?.toolName ?? '');
       const toolInput = entry?.toolInput ?? {};
       const reason = typeof entry?.reason === 'string' && entry.reason.trim() ? entry.reason.trim() : texts.noReason;
-      const preview = truncate(toolName === 'Bash' && typeof toolInput.command === 'string' ? toolInput.command : JSON.stringify(toolInput), config.previewMaxChars);
+      const preview = shown(toolName === 'Bash' && typeof toolInput.command === 'string' ? toolInput.command : JSON.stringify(toolInput), config.previewMaxChars);
       const label = newCode();
       if (entry?.sessionId !== sessionId) {
         log(`permission relay: ignored block ${label} reported by another Claude session (${entry?.sessionId})`);
@@ -306,7 +314,10 @@ export function createPermissionRelay({ config, client, botId, handle, locale, d
         return;
       }
       const command = toolInput.command.trim();
-      const content = texts.blocked({ bot: handle, tool: toolName, reason, command, folder: projectDir, timeoutMs: config.timeoutMs });
+      const shownCommand = literal(command);
+      if (shownCommand === null) { log(`permission relay: block ${label} stays in the terminal: ${hidesCode}`); return; }
+      if (!fitsWhole(shownCommand, config.previewMaxChars)) { log(`permission relay: block ${label} stays in the terminal: its masked command is longer than POLYROOM_PERMISSION_PREVIEW_MAX_CHARS`); return; }
+      const content = texts.blocked({ bot: handle, tool: toolName, reason, command: shownCommand, folder: projectDir, timeoutMs: config.timeoutMs });
       await openRequest({ key: `blocked-${entry.toolUseId ?? label}`, kind: 'blocked', label, content, extra: { command, rule: allowed.rule, projectDir: resolve(projectDir) } })
         .catch(warn(`cannot post block ${label}`));
     },

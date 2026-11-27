@@ -1,6 +1,6 @@
 {
   "name": "polyroom",
-  "version": "0.3.5",
+  "version": "0.4.2",
   "license": "MIT",
   "description": "Wakes this Codex conversation when the bot gets a mention, a direct message or a card notice in polyroom.",
   "author": { "name": "superint.ai", "url": "https://polyroom.ai" },

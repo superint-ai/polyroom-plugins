@@ -1,9 +1,9 @@
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { linkSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs';
+import { linkSync, lstatSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs';
 import http from 'node:http';
 import https from 'node:https';
-import { homedir, userInfo } from 'node:os';
+import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -20,9 +20,13 @@ const unreachableText = 'polyroom could not reach the chat to connect this conve
 const foreignCodeText = 'The polyroom connection code was not used, because this conversation did not get it from the chat_wake_code tool of polyroom. Tell the person, and run the polyroom connect skill again only if they ask.';
 const busyText = 'Another polyroom session on this computer already waits for notices for this agent, so this session does not wait. Close the other session, then send any message here so this one waits.';
 const alreadyConnectedText = 'This conversation is already connected to polyroom, so the new connection code was not used. To connect another agent, the person removes this connection on the Agents page of polyroom (open the agent, Edit in Connections, Revoke next to the connection under Connections and tokens, then Save), and then runs the polyroom connect skill again.';
+const appRefusedText = 'The chat refused the polyroom wake token, so this session stopped waiting for notices: the connection was removed or expired, or the agent or its workspace was deleted. Tell the person in one sentence, and say they can connect this agent again in the polyroom app.';
+const appCodeText = 'This conversation was opened by the polyroom app, which already connected it, so the connection code was not used. Tell the person in one sentence that it is already connected, then end the turn.';
+const appClaimText = 'This session was opened by the polyroom app, which already connected it, so it takes no connection code.';
 
 const unknownCursor = '999999999999999';
 const userAgent = 'polyroom-wake/1';
+const aclReadScript = "$ErrorActionPreference = 'Stop'; $sidType = [System.Security.Principal.SecurityIdentifier]; foreach ($path in $env:POLYROOM_WAKE_ACL_PATHS.Split([char]10)) { $acl = Get-Acl -LiteralPath $path; [Console]::Out.Write('P ' + $acl.GetOwner($sidType).Value + ' ' + [int]$acl.AreAccessRulesProtected + [char]10); foreach ($rule in @($acl.GetAccessRules($true, $true, $sidType))) { [Console]::Out.Write('R ' + $rule.IdentityReference.Value + ' ' + [int]$rule.AccessControlType + ' ' + [int]$rule.FileSystemRights + ' ' + [int]$rule.InheritanceFlags + ' ' + [int]$rule.PropagationFlags + ' ' + [int]$rule.IsInherited + [char]10) } }";
 const pluginRoot = fileURLToPath(new URL('..', import.meta.url));
 const escapeRegExp = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 const serverName = (() => {
@@ -50,6 +54,15 @@ if (!Object.hasOwn(actions, product) || !actions[product].includes(action)) {
 
 async function main() {
   const parent = process.ppid;
+  const appUrl = process.env.POLYROOM_WAKE_URL ?? '';
+  const appToken = process.env.POLYROOM_WAKE_TOKEN ?? '';
+  const appMode = appUrl !== '' || appToken !== '';
+  if (appMode && action === 'claim') {
+    process.stderr.write(`${appClaimText}\n`, () => process.exit(1));
+    return;
+  }
+  const appAddressValid = /^(?:https:\/\/[^/]|http:\/\/127\.0\.0\.1(?:[:/]|$))/.test(appUrl) && !/[\s\x00-\x1f\x7f?#@]/.test(appUrl);
+  if (appMode && !(process.env.POLYROOM_WAKE_DIR && appAddressValid && /^saw_[A-Za-z0-9_-]+$/.test(appToken))) process.exit(0);
   const dir = process.env.POLYROOM_WAKE_DIR
     || (product === 'codex' ? join(process.env.CODEX_HOME || join(homedir(), '.codex'), 'polyroom')
       : join(process.env.CLAUDE_CONFIG_DIR || join(homedir(), '.claude'), 'polyroom'));
@@ -136,9 +149,9 @@ async function main() {
   sweep();
 
   const values = settings();
-  let url = (values.POLYROOM_WAKE_URL ?? '').replace(/\/+$/, '');
-  let token = values.POLYROOM_WAKE_TOKEN ?? '';
-  let code = values.POLYROOM_WAKE_CODE ?? '';
+  let url = (appMode ? appUrl : values.POLYROOM_WAKE_URL ?? '').replace(/\/+$/, '');
+  let token = appMode ? appToken : values.POLYROOM_WAKE_TOKEN ?? '';
+  let code = appMode ? '' : values.POLYROOM_WAKE_CODE ?? '';
   const budget = numberSetting(values, 'POLYROOM_WAKE_BUDGET_SECONDS', 1740);
   const waitSeconds = numberSetting(values, 'POLYROOM_WAKE_WAIT_SECONDS', 20);
   const margin = numberSetting(values, 'POLYROOM_WAKE_MARGIN_SECONDS', 15);
@@ -160,7 +173,7 @@ async function main() {
     const text = readText(path);
     if (text === null) return { state: 'missing' };
     const parts = text.trim().split(/\s+/);
-    if (parts.length === 1 && isNumber(parts[0])) return { state: 'mine', number: parts[0] };
+    if (parts.length === 1 && isNumber(parts[0])) return appMode ? { state: 'foreign' } : { state: 'mine', number: parts[0] };
     if ((parts.length === 2 || parts.length === 3) && isNumber(parts[1])) {
       const { cksum: posix, sha } = marks();
       return parts[0] === posix || parts[0] === sha ? { state: 'mine', number: parts[1], turn: parts[2] ?? '' } : { state: 'foreign' };
@@ -176,7 +189,8 @@ async function main() {
     return parts.length === 3 && (parts[0] === posix || parts[0] === sha) && parts[1] === pending.number ? parts[2] : '';
   };
   const removePending = () => { remove(join(dir, 'pending')); remove(join(dir, 'pending-session')); };
-  const connectedAsBefore = () => (settings().POLYROOM_WAKE_TOKEN ?? '') === token;
+  const connectedAsBefore = () => appMode || (settings().POLYROOM_WAKE_TOKEN ?? '') === token;
+  const stoppedFile = join(dir, 'stopped');
 
   const send = (method, address, headers, body, timeoutSeconds) => new Promise((resolve) => {
     let settled = false;
@@ -246,37 +260,75 @@ async function main() {
   const exists = (path) => { try { statSync(path); return true; } catch { return false; } };
   const ownerOnlyMark = join(dir, '.owner-only');
   const hookFiles = ['wake.env', 'cursor', 'pending', 'pending-session', 'stopped', 'wake.lock'];
-  const hookEntry = (name) => [...hookFiles, '.owner-only'].includes(name) || /^wake\.env\.\d+\.tmp$/.test(name) || /^\.(?:auth|headers|body|status)\.\d+$/.test(name);
+  const hookEntry = (name) => [...hookFiles, '.owner-only', 'declined'].includes(name) || /^wake\.env\.\d+\.tmp$/.test(name) || /^\.(?:auth|headers|body|status)\.\d+$/.test(name);
   const onlyHookEntries = () => { try { return readdirSync(dir).every(hookEntry); } catch { return false; } };
-  const onlyOwnerFull = (listing, owner) => {
-    const lines = listing.split(/\r?\n/);
-    const end = lines.findIndex((line) => line.trim() === '');
-    const entries = lines.slice(0, end === -1 ? lines.length : end);
-    return entries.length === 1 && new RegExp(` ${escapeRegExp(owner)}:(?:\\((?:OI|CI|IO|NP|I)\\))*\\(F\\)$`, 'i').test(entries[0].trimEnd());
+  const allowRule = 0;
+  const fullControl = 2032127;
+  const folderAndFilesInherit = 3;
+  const windowsTool = (path, args, environment = process.env) => execFileSync(join(process.env.SystemRoot || 'C:\\Windows', 'System32', ...path), args, { shell: false, windowsHide: true, timeout: icaclsTimeoutMs, stdio: ['ignore', 'pipe', 'ignore'], encoding: 'utf8', env: environment });
+  const ownerSid = () => {
+    const found = windowsTool(['whoami.exe'], ['/user', '/fo', 'csv', '/nh']).match(/S-1-\d+(?:-\d+)+/g) || [];
+    if (found.length !== 1) throw new Error('whoami did not name one account');
+    return found[0];
+  };
+  const aclsOf = (paths) => {
+    const acls = [];
+    const answer = windowsTool(['WindowsPowerShell', 'v1.0', 'powershell.exe'], ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', aclReadScript], { ...process.env, POLYROOM_WAKE_ACL_PATHS: paths.join('\n') });
+    for (const line of answer.split(/\r?\n/).filter(Boolean)) {
+      const [kind, ...fields] = line.split(' ');
+      if (kind === 'P' && fields.length === 2) acls.push({ owner: fields[0], closed: fields[1] === '1', rules: [] });
+      else if (kind === 'R' && fields.length === 6 && acls.length) {
+        const [sid, type, rights, inheritance, propagation, inherited] = fields;
+        acls.at(-1).rules.push({ sid, type: Number(type), rights: Number(rights), inheritance: Number(inheritance), propagation: Number(propagation), inherited: inherited === '1' });
+      } else throw new Error('the permission read back is not understood');
+    }
+    if (acls.length !== paths.length) throw new Error('the permission read back did not answer for every path');
+    return acls;
+  };
+  const onlyOwnerFull = (sid, root, path, { owner, closed, rules }) => {
+    const [rule] = rules;
+    const applies = owner === sid && rules.length === 1 && rule.sid === sid && rule.type === allowRule && rule.rights === fullControl
+      && rule.inheritance === (lstatSync(path).isDirectory() ? folderAndFilesInherit : 0) && rule.propagation === 0;
+    return path === root ? applies && closed && !rule.inherited : applies;
   };
   const keepFolderToOwner = (beforeToken) => {
-    if (platform !== 'win32') return;
-    if (!onlyHookEntries()) { remove(ownerOnlyMark); return; }
-    if (!beforeToken && exists(ownerOnlyMark)) return;
+    if (platform !== 'win32') return true;
+    if (!onlyHookEntries()) { remove(ownerOnlyMark); return false; }
+    if (!beforeToken && exists(ownerOnlyMark)) return true;
     remove(ownerOnlyMark);
-    const icacls = join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'icacls.exe');
-    const run = (args) => execFileSync(icacls, args, { shell: false, windowsHide: true, timeout: icaclsTimeoutMs, stdio: ['ignore', 'pipe', 'ignore'], encoding: 'latin1' });
+    const icacls = (args) => windowsTool(['icacls.exe'], args);
     try {
-      const owner = process.env.USERDOMAIN ? `${process.env.USERDOMAIN}\\${userInfo().username}` : userInfo().username;
+      const sid = ownerSid();
       const files = hookFiles.map((name) => join(dir, name)).filter(exists);
-      run([dir, '/reset']);
-      run([dir, '/inheritance:r', '/grant:r', `${owner}:(OI)(CI)F`]);
-      for (const file of files) run([file, '/reset']);
-      if ([dir, ...files].every((path) => onlyOwnerFull(run([path]), owner))) write(ownerOnlyMark, '');
-    } catch {}
+      icacls([dir, '/setowner', `*${sid}`]);
+      icacls([dir, '/reset']);
+      icacls([dir, '/inheritance:r', '/grant:r', `*${sid}:(OI)(CI)F`]);
+      for (const file of files) {
+        icacls([file, '/setowner', `*${sid}`]);
+        icacls([file, '/reset']);
+      }
+      const paths = [dir, ...files];
+      const acls = aclsOf(paths);
+      if (!paths.every((path, index) => onlyOwnerFull(sid, dir, path, acls[index]))) return false;
+      return write(ownerOnlyMark, '');
+    } catch { return false; }
+  };
+  const folderProblem = `polyroom could not keep its wake folder ${dir} to this Windows account alone`;
+  const folderCheck = 'check that the folder holds only the files of polyroom and that this Windows account owns it and can change its permissions';
+  const folderStop = 'folder\n';
+
+  const recordOf = (line) => { try { return JSON.parse(line); } catch { return null; } };
+  const wakeCodeCallHolds = (record, offered) => {
+    const item = record?.type === 'event_msg' && record.payload?.type === 'item_completed' ? record.payload.item : null;
+    return item?.type === 'McpToolCall' && item.server === serverName && item.tool === 'chat_wake_code' && item.status === 'completed'
+      && item.result?.isError !== true && item.result?.structuredContent?.code === offered;
   };
 
   const issuedHere = async (transcript, offered) => {
     if (!transcript) return false;
     for (let tries = 0; ; tries++) {
       const text = readText(transcript);
-      if (text !== null && text.split('\n').some((line) => line.includes(`"server":"${serverName}","tool":"chat_wake_code"`)
-        && line.includes(`"structuredContent":{"code":"${offered}"`))) return true;
+      if (text !== null && text.split('\n').some((line) => line.includes(offered) && wakeCodeCallHolds(recordOf(line), offered))) return true;
       if (tries >= 4) return false;
       await pause(1);
     }
@@ -306,7 +358,7 @@ async function main() {
     pluginUrl = pluginUrl.replace(/\/+$/, '').replace(/\/mcp$/, '');
     if (!pluginUrl) await deliverText(addressMissingText);
     try { mkdirSync(dir, { recursive: true }); } catch { await finish(0); }
-    keepFolderToOwner(true);
+    if (!keepFolderToOwner(true)) await deliverText(`${folderProblem}, so this conversation is not connected and the code was not used. Tell the person to ${folderCheck}, and run the polyroom connect skill again only if they ask.`);
     url = pluginUrl;
     code = offered;
     if (!saveSetting('POLYROOM_WAKE_URL', url) || !saveSetting('POLYROOM_WAKE_TOKEN', '') || !saveSetting('POLYROOM_WAKE_CODE', code)) await finish(0);
@@ -327,10 +379,23 @@ async function main() {
   const turn = field('turn_id');
   const ownTurn = turn || field('prompt_id');
 
-  if (product === 'codex' && action === 'wait') await connectFromStop();
+  const appCodeOffered = () => (serverName
+    ? new RegExp(`${escapeRegExp(serverName)} wake code: \`?swc_[A-Za-z0-9_-]{43}\`?(?:\\\\n)?"`).test(input)
+    : / wake code: `?swc_[A-Za-z0-9_-]{43}/.test(input));
+  if (product === 'codex' && action === 'wait') {
+    if (!appMode) await connectFromStop();
+    else if (input && appCodeOffered()) await deliverText(appCodeText);
+  }
 
   try { if (!statSync(dir).isDirectory()) await finish(0); } catch { await finish(0); }
-  keepFolderToOwner(action === 'claim' || (!token && code !== ''));
+  const stopped = join(dir, 'stopped');
+  if (!keepFolderToOwner(action === 'claim' || (!token && code !== ''))) {
+    if (action === 'claim') await finish(1, { stderr: `${folderProblem}, so the code was not used: ${folderCheck}, then run the connect skill again.\n` });
+    if (action === 'session-start' || !(token || code) || exists(stopped)) await finish(0);
+    if (!write(stopped, folderStop)) await finish(0);
+    await deliverText(`${folderProblem}, so this session stopped waiting for notices and did not use its token. Tell the person in one sentence to ${folderCheck}; the session waits again by itself once that is fixed.`);
+  }
+  if (readText(stopped) === folderStop) remove(stopped);
   if (!url) await finish(0);
 
   if (action === 'claim') {
@@ -338,7 +403,7 @@ async function main() {
     await finish(0, { stdout: 'Connected: this session now wakes on polyroom notices.\n' });
   }
 
-  if (exists(join(dir, 'stopped'))) await finish(0);
+  if (appMode ? marked(stoppedFile).state === 'mine' : exists(stoppedFile)) await finish(0);
   if (!token) {
     if (!code) await finish(0);
     if (!(await claim())) await finish(0);
@@ -347,7 +412,7 @@ async function main() {
 
   const savedCursor = () => {
     const saved = marked(join(dir, 'cursor'));
-    return saved.state === 'mine' ? saved.number : saved.state === 'foreign' ? unknownCursor : '0';
+    return saved.state === 'mine' ? saved.number : saved.state === 'foreign' || appMode ? unknownCursor : '0';
   };
   let cursor = savedCursor();
 
@@ -362,12 +427,12 @@ async function main() {
     if (name) {
       const text = readText(join(lock, name));
       if (text === null) return null;
-      const [pid = '', heldSession = '', heldTurn = '', marker = ''] = text.split('\n');
-      return { pid: isNumber(pid) ? Number(pid) : 0, session: heldSession, turn: heldTurn, beats: marker === 'beats' };
+      const [pid = '', heldSession = '', heldTurn = '', marker = '', connection = ''] = text.split('\n');
+      return { pid: isNumber(pid) ? Number(pid) : 0, session: heldSession, turn: heldTurn, beats: marker === 'beats', connection };
     }
     const pid = (readText(join(lock, 'pid')) ?? '').trim();
     const [heldSession = '', heldTurn = ''] = (readText(join(lock, 'owner')) ?? '').trim().split(' ');
-    return { pid: isNumber(pid) ? Number(pid) : 0, session: heldSession, turn: heldTurn, beats: false };
+    return { pid: isNumber(pid) ? Number(pid) : 0, session: heldSession, turn: heldTurn, beats: false, connection: '' };
   };
   const awaitLockTest = async (seen) => {
     const gate = process.env.POLYROOM_WAKE_LOCK_TEST_GATE;
@@ -463,11 +528,12 @@ async function main() {
   if (!holder) await busy();
   const holderAlive = holder.pid !== process.pid && alive(holder.pid) && (!cooperative || await beating(top));
   const resumingListen = action === 'listen' && field('source') === 'resume';
-  if (holderAlive && (!session || holder.session !== session || (holder.turn === ownTurn && !resumingListen))) await busy();
+  const holderReplaced = !appMode && holder.connection !== '' && holder.connection !== ownMark() && connectedAsBefore();
+  if (holderAlive && !holderReplaced && (!session || holder.session !== session || (holder.turn === ownTurn && !resumingListen))) await busy();
   await awaitLockTest(top || '0');
   const next = String(Number(top || '0') + 1);
   try {
-    writeFileSync(staged, `${process.pid}\n${session}\n${ownTurn}\n${cooperative ? 'beats\n' : ''}`);
+    writeFileSync(staged, `${process.pid}\n${session}\n${ownTurn}\n${cooperative ? 'beats' : ''}\n${ownMark()}\n`);
     linkSync(staged, join(lock, next));
   } catch {
     remove(staged);
@@ -531,8 +597,9 @@ async function main() {
       continue;
     }
     if (answer.status === 401 || answer.status === 403) {
-      write(join(dir, 'stopped'), '');
-      await deliverText(refusedText);
+      if (appMode) saveMarked(stoppedFile, '0');
+      else write(stoppedFile, '');
+      await deliverText(appMode ? appRefusedText : refusedText);
     }
     left = deadline - now() - margin;
     if (left < 1) break;

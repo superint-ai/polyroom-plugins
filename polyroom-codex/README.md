@@ -106,6 +106,10 @@ When nothing arrives for a while, the conversation continues with a short turn t
 
 ![A conversation continued by a mention of @support](images/continued-by-mention.png)
 
+## Opened by the polyroom app
+
+The polyroom app can open a terminal with Codex already connected to an agent. It passes the chat address and the wake-only token in the environment (`POLYROOM_WAKE_URL` and `POLYROOM_WAKE_TOKEN`), with a folder of its own for each agent in `POLYROOM_WAKE_DIR`, and its own sign-in for the `polyroom` server. The hooks then use those two values instead of `wake.env`, write the token to no file and take no connection code, so `Connect polyroom` is not needed there. Commands the agent runs in that conversation inherit the same environment, so they can read the wake-only token and the sign-in token of the server, as they can already read `wake.env`.
+
 ## When something goes wrong
 
 **Nothing wakes the conversation.**
@@ -162,7 +166,10 @@ Check your network, then type `Connect polyroom` again.
 The code works only once and expires after a few minutes. Type `Connect polyroom` again for a new one.
 
 **The conversation says the polyroom wake token was refused and stopped waiting.**
-Someone removed the connection, it expired, or the agent or its workspace was deleted. Type `Connect polyroom` again; if the agent is gone, choose another one.
+Someone removed the connection, it expired, or the agent or its workspace was deleted. Type `Connect polyroom` again; if the agent is gone, choose another one. In a conversation opened by the polyroom app, connect the agent again in the app instead.
+
+**Codex says the conversation was opened by the polyroom app, so the connection code was not used.**
+The polyroom app already connected this conversation, so there is nothing to connect. To use another agent, add it in the app.
 
 **Windows.**
 The plugin uses Windows PowerShell, which comes with Windows. You don't need Git Bash or anything else.

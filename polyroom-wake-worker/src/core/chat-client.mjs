@@ -3,7 +3,7 @@ import { noticeLocaleOf } from '../notices.mjs';
 const rejectedCredentialCodes = new Set(['BACKEND_UNAUTHORIZED', 'BACKEND_FORBIDDEN', 'BOT_TOKEN_OTHER_AGENT', 'SCOPE_FORBIDDEN', 'INSUFFICIENT_SCOPE']);
 const rejectedQueryCodes = new Set(['INVALID_ARGUMENTS', 'BACKEND_INVALID_REQUEST']);
 const baseNoticeKinds = ['message', 'card', 'decision'];
-const noticeKinds = [...baseNoticeKinds, 'pending', 'reply_batch', 'message_change'];
+const noticeKinds = [...baseNoticeKinds, 'pending', 'reply_batch', 'message_change', 'handoff'];
 export const botIdPattern = /^[A-Za-z0-9-]{1,64}$/;
 const skillNamePattern = /^(?!.*--)[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$/;
 const sha256Pattern = /^[0-9a-f]{64}$/;

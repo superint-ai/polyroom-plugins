@@ -25,9 +25,22 @@ const settings = (path) => {
   return values;
 };
 
-const offerText = (declined) => [
+const languageNames = { pt: 'Brazilian Portuguese', es: 'Spanish' };
+
+const systemLocale = () => {
+  for (const name of ['LC_ALL', 'LC_MESSAGES', 'LANG']) {
+    const value = (process.env[name] || '').trim();
+    if (value) return value === 'C' || value === 'POSIX' || value.startsWith('C.') ? '' : value;
+  }
+  try { return Intl.DateTimeFormat().resolvedOptions().locale; } catch { return ''; }
+};
+
+const systemLanguage = () => languageNames[systemLocale().slice(0, 2).toLowerCase()] ?? 'English';
+
+const offerText = (declined, language) => [
   'polyroom is installed in this Claude Code, but this session is not connected to a polyroom agent yet. This notice comes from the polyroom plugin, not from the person.',
-  'Tell the person that in one sentence and ask whether they want to connect now. Do not run the connect skill or call any tool on your own.',
+  `Tell the person that in one sentence and ask whether they want to connect now, in ${language}, the language of this computer, because the person has not written yet; once they write, answer in their language.`,
+  'Do not run the connect skill or call any tool on your own.',
   'To connect, they paste the connect line that polyroom shows them, say connect, or type /polyroom:connect.',
   'The sign-in happens only in the browser: never ask the person for the return address of the browser sign-in, a code or a token, never accept one they paste, and never pass one to the complete_authentication tool.',
   `If they say not now, write an empty file at ${declined} with the Write tool, and tell them they can connect later with /polyroom:connect.`,
@@ -42,4 +55,4 @@ const dir = process.env.POLYROOM_WAKE_DIR || join(process.env.CLAUDE_CONFIG_DIR 
 const values = settings(join(dir, 'wake.env'));
 if (values.POLYROOM_WAKE_TOKEN || values.POLYROOM_WAKE_CODE || existsSync(join(dir, 'declined'))) quiet();
 
-process.stderr.write(`${offerText(join(dir, 'declined'))}\n`, () => process.exit(2));
+process.stderr.write(`${offerText(join(dir, 'declined'), systemLanguage())}\n`, () => process.exit(2));

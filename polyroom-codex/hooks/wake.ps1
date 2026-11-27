@@ -14,6 +14,19 @@ if (@('codex:wait', 'codex:session-start', 'codex:claim', 'claude:wait', 'claude
   exit 64
 }
 
+$appUrl = "$env:POLYROOM_WAKE_URL"
+$appToken = "$env:POLYROOM_WAKE_TOKEN"
+$appMode = [bool]($appUrl -or $appToken)
+if ($appMode) {
+  if ($Action -eq 'claim') {
+    [Console]::Error.WriteLine('This session was opened by the polyroom app, which already connected it, so it takes no connection code.')
+    exit 1
+  }
+  if (-not $env:POLYROOM_WAKE_DIR) { exit 0 }
+  if ($appUrl -cnotmatch '^(?:https://[^/]|http://127\.0\.0\.1(?:[:/]|\z))' -or $appUrl -match '[\s\x00-\x1f\x7f?#@]') { exit 0 }
+  if ($appToken -cnotmatch '^saw_[A-Za-z0-9_-]+\z') { exit 0 }
+}
+
 if ($env:POLYROOM_WAKE_DIR) {
   $dir = $env:POLYROOM_WAKE_DIR
 } elseif ($Product -eq 'codex') {
@@ -42,6 +55,8 @@ $unreachableText = 'polyroom could not reach the chat to connect this conversati
 $foreignCodeText = 'The polyroom connection code was not used, because this conversation did not get it from the chat_wake_code tool of polyroom. Tell the person, and run the polyroom connect skill again only if they ask.'
 $busyText = 'Another polyroom session on this computer already waits for notices for this agent, so this session does not wait. Close the other session, then send any message here so this one waits.'
 $alreadyConnectedText = 'This conversation is already connected to polyroom, so the new connection code was not used. To connect another agent, the person removes this connection on the Agents page of polyroom (open the agent, Edit in Connections, Revoke next to the connection under Connections and tokens, then Save), and then runs the polyroom connect skill again.'
+$appCodeText = 'This conversation was opened by the polyroom app, which already connected it, so the connection code was not used. Tell the person in one sentence that it is already connected, then end the turn.'
+$appRefusedText = 'The chat refused the polyroom wake token, so this session stopped waiting for notices: the connection was removed or expired, or the agent or its workspace was deleted. Tell the person in one sentence, and say they can connect this agent again in the polyroom app.'
 
 function Read-Settings {
   $values = @{}
@@ -55,7 +70,11 @@ function Read-Settings {
 }
 
 function Test-ConnectedAsBefore {
-  (Read-Settings)['POLYROOM_WAKE_TOKEN'] -eq $script:token
+  $appMode -or (Read-Settings)['POLYROOM_WAKE_TOKEN'] -eq $script:token
+}
+
+function Remove-Files([string[]]$Paths) {
+  foreach ($path in $Paths) { try { Remove-Item -LiteralPath $path -Force -ErrorAction SilentlyContinue } catch { } }
 }
 
 function Save-Setting([string]$Key, [string]$Value) {
@@ -67,7 +86,7 @@ function Save-Setting([string]$Key, [string]$Value) {
     [System.IO.File]::WriteAllLines($temporary, [string[]]$lines, $utf8)
     Move-Item -LiteralPath $temporary -Destination $config -Force
   } finally {
-    Remove-Item -LiteralPath $temporary -Force -ErrorAction SilentlyContinue
+    Remove-Files $temporary
   }
 }
 
@@ -92,7 +111,7 @@ function Get-TokenMark {
 function Read-Marked([string]$Path) {
   if (-not (Test-Path -LiteralPath $Path)) { return @{ State = 'missing' } }
   $parts = @(([System.IO.File]::ReadAllText($Path, $utf8)).Trim() -split '\s+')
-  if ($parts.Count -eq 1 -and $parts[0] -match '^\d+$') { return @{ State = 'mine'; Number = $parts[0] } }
+  if ($parts.Count -eq 1 -and $parts[0] -match '^\d+$') { if ($appMode) { return @{ State = 'foreign' } }; return @{ State = 'mine'; Number = $parts[0] } }
   if (($parts.Count -eq 2 -or $parts.Count -eq 3) -and $parts[1] -match '^\d+$') {
     if ($parts[0] -eq (Get-TokenMark)) { return @{ State = 'mine'; Number = $parts[1]; Turn = $(if ($parts.Count -eq 3) { $parts[2] } else { '' }) } }
     return @{ State = 'foreign' }
@@ -105,21 +124,28 @@ function Write-Number([string]$Path, [string]$Value) {
 }
 
 $settings = Read-Settings
-$url = "$($settings['POLYROOM_WAKE_URL'])".TrimEnd('/')
-$token = "$($settings['POLYROOM_WAKE_TOKEN'])"
-$code = "$($settings['POLYROOM_WAKE_CODE'])"
+if ($appMode) {
+  $url = $appUrl.TrimEnd('/')
+  $token = $appToken
+  $code = ''
+} else {
+  $url = "$($settings['POLYROOM_WAKE_URL'])".TrimEnd('/')
+  $token = "$($settings['POLYROOM_WAKE_TOKEN'])"
+  $code = "$($settings['POLYROOM_WAKE_CODE'])"
+}
 $budget = Number-Setting $settings 'POLYROOM_WAKE_BUDGET_SECONDS' 1740
 $waitSeconds = Number-Setting $settings 'POLYROOM_WAKE_WAIT_SECONDS' 20
 $margin = Number-Setting $settings 'POLYROOM_WAKE_MARGIN_SECONDS' 15
 $retryMin = Number-Setting $settings 'POLYROOM_WAKE_RETRY_MIN_SECONDS' 2
 $retryMax = Number-Setting $settings 'POLYROOM_WAKE_RETRY_MAX_SECONDS' 60
 $startToleranceMs = Number-Setting $settings 'POLYROOM_WAKE_START_TOLERANCE_MS' 100
+$icaclsTimeoutMs = [Math]::Max((Number-Setting $settings 'POLYROOM_WAKE_ICACLS_TIMEOUT_MS' 10000), 1000)
 $unknownCursor = '999999999999999'
 $userAgent = 'polyroom-wake/1'
 
 foreach ($leftover in @(Get-ChildItem -LiteralPath $dir -Filter 'wake.env.*.tmp' -File -ErrorAction SilentlyContinue)) {
   if ($leftover.Name -match '^wake\.env\.(\d{1,9})\.tmp$' -and ([int]$Matches[1] -eq $PID -or -not (Get-Process -Id ([int]$Matches[1]) -ErrorAction SilentlyContinue))) {
-    Remove-Item -LiteralPath $leftover.FullName -Force -ErrorAction SilentlyContinue
+    Remove-Files $leftover.FullName
   }
 }
 
@@ -154,7 +180,7 @@ function Invoke-Claim {
     Save-Setting 'POLYROOM_WAKE_CODE' ''
     $script:token = $received
     Write-Marked (Join-Path $dir 'cursor') $unknownCursor
-    Remove-Item -LiteralPath (Join-Path $dir 'stopped'), (Join-Path $dir 'pending') -Force -ErrorAction SilentlyContinue
+    Remove-Files (Join-Path $dir 'stopped'), (Join-Path $dir 'pending')
     return $true
   }
   [Console]::Error.WriteLine("The chat refused the connection code (HTTP $($answer.Status)). Run the connect skill again for a new code.")
@@ -178,11 +204,124 @@ function Deliver-Body([string]$Body) {
 
 function Deliver-Text([string]$Text) {
   if ($Product -eq 'codex') {
-    [Console]::Out.WriteLine((@{ decision = 'block'; reason = $Text } | ConvertTo-Json -Compress))
+    [Console]::Out.WriteLine(([ordered]@{ decision = 'block'; reason = $Text } | ConvertTo-Json -Compress))
     exit 0
   }
   [Console]::Error.WriteLine($Text)
   exit 2
+}
+
+$ownerOnlyMark = Join-Path $dir '.owner-only'
+$hookFiles = @('wake.env', 'cursor', 'pending', 'pending-session', 'stopped', 'wake.lock')
+$folderProblem = "polyroom could not keep its wake folder $dir to this Windows account alone"
+$folderCheck = 'check that the folder holds only the files of polyroom and that this Windows account owns it and can change its permissions'
+$folderStop = "folder`n"
+
+function Test-HookEntry([string]$Name) {
+  ($hookFiles + @('.owner-only', 'declined')) -ccontains $Name -or $Name -cmatch '^wake\.env\.\d+\.tmp$' -or $Name -cmatch '^\.(?:auth|headers|body|status)\.\d+$'
+}
+
+function Test-OnlyHookEntries {
+  try {
+    foreach ($entry in @(Get-ChildItem -LiteralPath $dir -Force -Name -ErrorAction Stop)) { if (-not (Test-HookEntry $entry)) { return $false } }
+    return $true
+  } catch {
+    return $false
+  }
+}
+
+function Format-Argument([string]$Value) {
+  if ($Value -and $Value -notmatch '[\s"]') { return $Value }
+  '"' + (($Value -replace '(\\*)"', '$1$1\"') -replace '(\\+)$', '$1$1') + '"'
+}
+
+function Invoke-WindowsTool([string]$Name, [string[]]$Arguments) {
+  $root = if ($env:SystemRoot) { $env:SystemRoot } else { 'C:\Windows' }
+  $start = New-Object System.Diagnostics.ProcessStartInfo
+  $start.FileName = Join-Path (Join-Path $root 'System32') $Name
+  $start.Arguments = (@($Arguments | ForEach-Object { Format-Argument $_ })) -join ' '
+  $start.UseShellExecute = $false
+  $start.CreateNoWindow = $true
+  $start.RedirectStandardInput = $true
+  $start.RedirectStandardOutput = $true
+  $start.RedirectStandardError = $true
+  $process = [System.Diagnostics.Process]::Start($start)
+  try {
+    $process.StandardInput.Close()
+    $output = $process.StandardOutput.ReadToEndAsync()
+    $null = $process.StandardError.ReadToEndAsync()
+    $clock = [System.Diagnostics.Stopwatch]::StartNew()
+    while (-not $process.HasExited) {
+      if ($clock.ElapsedMilliseconds -ge $icaclsTimeoutMs) { throw "$Name passed its time limit" }
+      Start-Sleep -Milliseconds 25
+    }
+    if ($process.ExitCode -ne 0) { throw "$Name ended with $($process.ExitCode)" }
+    $output.Result
+  } finally {
+    if (-not $process.HasExited) { try { $process.Kill() } catch {} }
+    $process.Dispose()
+  }
+}
+
+function Get-OwnerSid {
+  $found = @([regex]::Matches((Invoke-WindowsTool 'whoami.exe' @('/user', '/fo', 'csv', '/nh')), 'S-1-\d+(?:-\d+)+'))
+  if ($found.Count -ne 1) { throw 'whoami did not name one account' }
+  $found[0].Value
+}
+
+function Test-OnlyOwnerFull([string]$Path, [string]$Sid) {
+  $acl = Get-Acl -LiteralPath $Path -ErrorAction Stop
+  if ($acl.GetOwner([System.Security.Principal.SecurityIdentifier]).Value -cne $Sid) { return $false }
+  $rules = @($acl.GetAccessRules($true, $true, [System.Security.Principal.SecurityIdentifier]))
+  if ($rules.Count -ne 1) { return $false }
+  $rule = $rules[0]
+  $inheritance = if (Test-Path -LiteralPath $Path -PathType Container) { [System.Security.AccessControl.InheritanceFlags]'ContainerInherit, ObjectInherit' } else { [System.Security.AccessControl.InheritanceFlags]::None }
+  $applies = $rule.IdentityReference.Value -ceq $Sid -and
+    $rule.AccessControlType -eq [System.Security.AccessControl.AccessControlType]::Allow -and
+    $rule.FileSystemRights -eq [System.Security.AccessControl.FileSystemRights]::FullControl -and
+    $rule.InheritanceFlags -eq $inheritance -and
+    $rule.PropagationFlags -eq [System.Security.AccessControl.PropagationFlags]::None
+  if ($Path -ceq $dir) { return $applies -and $acl.AreAccessRulesProtected -and -not $rule.IsInherited }
+  $applies
+}
+
+function Keep-FolderToOwner([bool]$BeforeToken) {
+  if (-not (Test-OnlyHookEntries)) {
+    Remove-Item -LiteralPath $ownerOnlyMark -Force -ErrorAction SilentlyContinue
+    return $false
+  }
+  if (-not $BeforeToken -and (Test-Path -LiteralPath $ownerOnlyMark)) { return $true }
+  Remove-Item -LiteralPath $ownerOnlyMark -Force -ErrorAction SilentlyContinue
+  try {
+    $sid = Get-OwnerSid
+    $files = @($hookFiles | ForEach-Object { Join-Path $dir $_ } | Where-Object { Test-Path -LiteralPath $_ })
+    Invoke-WindowsTool 'icacls.exe' @($dir, '/setowner', "*$sid") | Out-Null
+    Invoke-WindowsTool 'icacls.exe' @($dir, '/reset') | Out-Null
+    Invoke-WindowsTool 'icacls.exe' @($dir, '/inheritance:r', '/grant:r', "*${sid}:(OI)(CI)F") | Out-Null
+    foreach ($file in $files) {
+      Invoke-WindowsTool 'icacls.exe' @($file, '/setowner', "*$sid") | Out-Null
+      Invoke-WindowsTool 'icacls.exe' @($file, '/reset') | Out-Null
+    }
+    foreach ($path in @($dir) + $files) {
+      if (-not (Test-OnlyOwnerFull $path $sid)) { return $false }
+    }
+    [System.IO.File]::WriteAllText($ownerOnlyMark, '', $utf8)
+    return $true
+  } catch {
+    return $false
+  }
+}
+
+function Test-Text($Value, [string]$Expected) {
+  ($Value -is [string]) -and [string]::Equals($Value, $Expected, [System.StringComparison]::Ordinal)
+}
+
+function Test-WakeCodeCall([string]$Line, [string]$Offered) {
+  try { $record = $Line | ConvertFrom-Json } catch { return $false }
+  if ($record -isnot [System.Management.Automation.PSCustomObject]) { return $false }
+  $item = $record.payload.item
+  (Test-Text $record.type 'event_msg') -and (Test-Text $record.payload.type 'item_completed') -and (Test-Text $item.type 'McpToolCall') -and (Test-Text $item.server $serverName) -and
+    (Test-Text $item.tool 'chat_wake_code') -and (Test-Text $item.status 'completed') -and -not (($item.result.isError -is [bool]) -and $item.result.isError) -and (Test-Text $item.result.structuredContent.code $Offered)
 }
 
 function Test-IssuedHere([string]$Transcript, [string]$Offered) {
@@ -194,7 +333,7 @@ function Test-IssuedHere([string]$Transcript, [string]$Offered) {
         $stream = New-Object System.IO.FileStream($Transcript, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::ReadWrite)
         $reader = New-Object System.IO.StreamReader($stream, $utf8)
         while ($null -ne ($line = $reader.ReadLine())) {
-          if ($line.Contains("`"server`":`"$serverName`",`"tool`":`"chat_wake_code`"") -and $line.Contains("`"structuredContent`":{`"code`":`"$Offered`"")) { return $true }
+          if ($line.Contains($Offered) -and (Test-WakeCodeCall $line $Offered)) { return $true }
         }
       } catch {
       } finally {
@@ -241,7 +380,12 @@ function Test-Orphaned {
   }
 }
 
-if ($Product -eq 'codex' -and $Action -eq 'wait' -and $stopText) {
+if ($Product -eq 'codex' -and $Action -eq 'wait' -and $stopText -and $appMode) {
+  $appCodePattern = $(if ($serverName) { [regex]::Escape($serverName) + ' wake code: `?swc_[A-Za-z0-9_-]{43}`?(\\n)?"' } else { ' wake code: `?swc_[A-Za-z0-9_-]{43}' })
+  if ([regex]::IsMatch($stopText, $appCodePattern)) { Deliver-Text $appCodeText }
+}
+
+if ($Product -eq 'codex' -and $Action -eq 'wait' -and $stopText -and -not $appMode) {
   if (-not $serverName -and $stopText -match ' wake code: `?swc_[A-Za-z0-9_-]{43}') { Deliver-Text $addressMissingText }
   $offers = @()
   if ($serverName) { $offers = [regex]::Matches($stopText, [regex]::Escape($serverName) + ' wake code: `?(swc_[A-Za-z0-9_-]{43})`?(\\n)?"') }
@@ -261,6 +405,7 @@ if ($Product -eq 'codex' -and $Action -eq 'wait' -and $stopText) {
     if ($pluginUrl.EndsWith('/mcp')) { $pluginUrl = $pluginUrl.Substring(0, $pluginUrl.Length - 4) }
     if (-not $pluginUrl) { Deliver-Text $addressMissingText }
     New-Item -ItemType Directory -Path $dir -Force | Out-Null
+    if (-not (Keep-FolderToOwner $true)) { Deliver-Text "$folderProblem, so this conversation is not connected and the code was not used. Tell the person to $folderCheck, and run the polyroom connect skill again only if they ask." }
     $url = $pluginUrl
     $code = $offered
     Save-Setting 'POLYROOM_WAKE_URL' $url
@@ -275,6 +420,17 @@ if ($Product -eq 'codex' -and $Action -eq 'wait' -and $stopText) {
 }
 
 if (-not (Test-Path -LiteralPath $dir -PathType Container)) { exit 0 }
+$stoppedFile = Join-Path $dir 'stopped'
+if (-not (Keep-FolderToOwner ($Action -eq 'claim' -or (-not $token -and $code -ne '')))) {
+  if ($Action -eq 'claim') {
+    [Console]::Error.WriteLine("$folderProblem, so the code was not used: $folderCheck, then run the connect skill again.")
+    exit 1
+  }
+  if ($Action -eq 'session-start' -or -not ($token -or $code) -or (Test-Path -LiteralPath $stoppedFile)) { exit 0 }
+  try { [System.IO.File]::WriteAllText($stoppedFile, $folderStop, $utf8) } catch { exit 0 }
+  Deliver-Text "$folderProblem, so this session stopped waiting for notices and did not use its token. Tell the person in one sentence to $folderCheck; the session waits again by itself once that is fixed."
+}
+if ((Test-Path -LiteralPath $stoppedFile -PathType Leaf) -and [System.IO.File]::ReadAllText($stoppedFile, $utf8) -ceq $folderStop) { Remove-Item -LiteralPath $stoppedFile -Force -ErrorAction SilentlyContinue }
 if (-not $url) { exit 0 }
 
 if ($Action -eq 'claim') {
@@ -283,7 +439,8 @@ if ($Action -eq 'claim') {
   exit 0
 }
 
-if (Test-Path -LiteralPath (Join-Path $dir 'stopped')) { exit 0 }
+$stoppedFile = Join-Path $dir 'stopped'
+if ($(if ($appMode) { (Read-Marked $stoppedFile).State -eq 'mine' } else { Test-Path -LiteralPath $stoppedFile })) { exit 0 }
 if (-not $token) {
   if (-not $code) { exit 0 }
   if (-not (Invoke-Claim)) { exit 0 }
@@ -293,7 +450,7 @@ $cursorFile = Join-Path $dir 'cursor'
 $pendingFile = Join-Path $dir 'pending'
 function Read-Cursor {
   $savedCursor = Read-Marked $cursorFile
-  if ($savedCursor.State -eq 'mine') { $savedCursor.Number } elseif ($savedCursor.State -eq 'foreign') { $unknownCursor } else { '0' }
+  if ($savedCursor.State -eq 'mine') { $savedCursor.Number } elseif ($savedCursor.State -eq 'foreign' -or $appMode) { $unknownCursor } else { '0' }
 }
 $cursor = Read-Cursor
 
@@ -335,6 +492,7 @@ function Read-Holder([string]$Name) {
     Session = if ($lines.Count -gt 1) { "$($lines[1])".Trim() } else { '' }
     Turn = if ($lines.Count -gt 2) { "$($lines[2])".Trim() } else { '' }
     Start = if ($lines.Count -gt 3) { "$($lines[3])".Trim() } else { '' }
+    Connection = if ($Name -and $lines.Count -gt 4) { "$($lines[4])".Trim() } else { '' }
     Path = $path
   }
 }
@@ -390,15 +548,15 @@ function Clear-OldRecords {
   foreach ($name in @(Get-ChildItem -LiteralPath $lock -Name -File -Force -ErrorAction SilentlyContinue)) {
     $path = Join-Path $lock $name
     if ($name -match '^\.new\.(\d+)$') {
-      if (-not (Get-LiveProcess ([int]$Matches[1]))) { Remove-Item -LiteralPath $path -Force -ErrorAction SilentlyContinue }
+      if (-not (Get-LiveProcess ([int]$Matches[1]))) { Remove-Files $path }
     } elseif ($name -match '^\d+$' -and [long]$name -lt [long]$script:record) {
       $old = Read-Holder $name
-      if (-not (Test-Holding $old)) { Remove-Item -LiteralPath $path -Force -ErrorAction SilentlyContinue }
+      if (-not (Test-Holding $old)) { Remove-Files $path }
     }
   }
   $legacy = Read-Holder ''
   if (-not (Test-Holding $legacy)) {
-    Remove-Item -LiteralPath (Join-Path $lock 'pid'), (Join-Path $lock 'owner') -Force -ErrorAction SilentlyContinue
+    Remove-Files (Join-Path $lock 'pid'), (Join-Path $lock 'owner')
   }
 }
 
@@ -407,17 +565,18 @@ try {
   $top = Get-TopRecord
   $holder = Read-Holder $top
   if (-not $holder) { Exit-Busy }
-  if ((Test-Holding $holder) -and (-not $session -or $holder.Session -ne $session -or $holder.Turn -eq $ownTurn)) { Exit-Busy }
+  $holderReplaced = -not $appMode -and $holder.Connection -and $holder.Connection -ne (Get-TokenMark) -and (Test-ConnectedAsBefore)
+  if ((Test-Holding $holder) -and -not $holderReplaced -and (-not $session -or $holder.Session -ne $session -or $holder.Turn -eq $ownTurn)) { Exit-Busy }
   $topNumber = if ($top) { [long]$top } else { [long]0 }
   Wait-LockTest "$topNumber"
   $next = "$($topNumber + 1)"
   try {
     $ownStart = Get-StartTicks (Get-Process -Id $PID)
     $ownMark = if ($null -ne $ownStart) { "start:$ownStart" } else { '' }
-    [System.IO.File]::WriteAllText($staged, "$PID`n$session`n$ownTurn`n$ownMark`n", $utf8)
+    [System.IO.File]::WriteAllText($staged, "$PID`n$session`n$ownTurn`n$ownMark`n$(Get-TokenMark)`n", $utf8)
     [System.IO.File]::Move($staged, (Join-Path $lock $next))
   } catch {
-    Remove-Item -LiteralPath $staged -Force -ErrorAction SilentlyContinue
+    Remove-Files $staged
     Exit-Busy
   }
   $record = $next
@@ -430,7 +589,7 @@ try {
     $cursor = $savedPending.Number
     Write-Marked $cursorFile $cursor
   }
-  Remove-Item -LiteralPath $pendingFile -Force -ErrorAction SilentlyContinue
+  Remove-Files $pendingFile
 
   $format = if ($Product -eq 'codex') { 'stop' } else { 'text' }
   $deadline = [DateTime]::UtcNow.AddSeconds($budget)
@@ -464,7 +623,11 @@ try {
       continue
     }
     if ($answer.Status -eq 401 -or $answer.Status -eq 403) {
-      [System.IO.File]::WriteAllText((Join-Path $dir 'stopped'), '', $utf8)
+      if ($appMode) {
+        Write-Marked $stoppedFile '0'
+        Deliver-Text $appRefusedText
+      }
+      [System.IO.File]::WriteAllText($stoppedFile, '', $utf8)
       Deliver-Text $refusedText
     }
     $left = [int][Math]::Floor(($deadline - [DateTime]::UtcNow).TotalSeconds) - $margin
@@ -475,12 +638,12 @@ try {
   if (-not (Test-HoldsLock)) { exit 0 }
   Deliver-Text $idleText
 } finally {
-  Remove-Item -LiteralPath $staged -Force -ErrorAction SilentlyContinue
+  Remove-Files $staged
   if ($record) {
     if (Test-HoldsLock) {
       try { [System.IO.File]::WriteAllText((Join-Path $lock $record), "released`n", $utf8) } catch {}
     } else {
-      Remove-Item -LiteralPath (Join-Path $lock $record) -Force -ErrorAction SilentlyContinue
+      Remove-Files (Join-Path $lock $record)
     }
   }
 }

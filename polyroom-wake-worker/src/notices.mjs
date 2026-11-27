@@ -58,8 +58,27 @@ const catalogs = {
     otherDecisionLead: { by: (sender, room) => `${sender} mandou um aviso sobre uma decisão ${room}`, alone: (room) => `Você recebeu um aviso sobre uma decisão ${room}` },
     pendingLeads: {
       pending_assigned: { by: (sender, room) => `${sender} abriu uma pendência para você sobre uma mensagem ${room}`, alone: (room) => `Abriram uma pendência para você sobre uma mensagem ${room}` },
+      pending_answered: { by: (sender, room) => `${sender} respondeu a uma pendência que você abriu ${room}`, alone: (room) => `Responderam a uma pendência que você abriu ${room}` },
     },
     otherPendingLead: { by: (sender, room) => `${sender} mandou um aviso sobre uma pendência ${room}`, alone: (room) => `Você recebeu um aviso sobre uma pendência ${room}` },
+    handoffLeads: {
+      handoff_offered: { by: (sender, room) => `${sender} passou uma tarefa para você ${room}: aceite ou recuse com chat_handoff_respond antes de trabalhar nela`,
+        alone: (room) => `Passaram uma tarefa para você ${room}: aceite ou recuse com chat_handoff_respond antes de trabalhar nela` },
+      handoff_resumed: { by: (sender, room) => `${sender} retomou uma tarefa passada para você ${room}: comece de novo com chat_handoff_start`,
+        alone: (room) => `Uma tarefa passada para você foi retomada ${room}: comece de novo com chat_handoff_start` },
+      handoff_declined: { by: (sender, room) => `${sender} recusou uma tarefa que você passou ${room}: resolva, cancele ou reatribua a pendência`,
+        alone: (room) => `Uma tarefa que você passou foi recusada ${room}: resolva, cancele ou reatribua a pendência` },
+      handoff_expired: { by: (sender, room) => `Uma tarefa que você passou expirou ${room}: resolva, cancele ou reatribua a pendência`,
+        alone: (room) => `Uma tarefa que você passou expirou ${room}: resolva, cancele ou reatribua a pendência` },
+      handoff_attempt_unknown: { by: (sender, room) => `${sender} parou de dar sinal numa tarefa que você passou ${room}: concilie a tentativa com chat_handoff_reconcile antes de qualquer outra coisa`,
+        alone: (room) => `Uma tentativa de uma tarefa que você passou parou de dar sinal ${room}: concilie com chat_handoff_reconcile antes de qualquer outra coisa` },
+      handoff_stopped: { by: (sender, room) => `${sender} parou, a seu pedido, uma tarefa que você passou ${room}: retome, retire ou reatribua`,
+        alone: (room) => `Uma tarefa que você passou parou a pedido ${room}: retome, retire ou reatribua` },
+      handoff_result: { by: (sender, room) => `${sender} entregou o resultado de uma tarefa que você passou ${room}: leia com chat_room_context e resolva a pendência; não responda ao resultado`,
+        alone: (room) => `O resultado de uma tarefa que você passou foi entregue ${room}: leia com chat_room_context e resolva a pendência; não responda ao resultado` },
+    },
+    otherHandoffLead: { by: (sender, room) => `${sender} mandou um aviso sobre uma tarefa passada ${room}`, alone: (room) => `Você recebeu um aviso sobre uma tarefa passada ${room}` },
+    handoffReference: (pendingId, handoffId, attempt) => `pendência ${pendingId}, passagem ${handoffId}${attempt ? `, tentativa ${attempt}` : ''}`,
     batchLeads: {
       closed: (room, answered, total) => `Sua solicitação de respostas ${room} foi encerrada: ${answered === 0 ? 'nenhum agente respondeu ou reagiu'
         : `${answered} de ${total} ${total === 1 ? 'agente' : 'agentes'} ${answered === 1 ? 'respondeu ou reagiu' : 'responderam ou reagiram'}`}`,
@@ -132,8 +151,27 @@ const catalogs = {
     otherDecisionLead: { by: (sender, room) => `${sender} sent a notice about a decision ${room}`, alone: (room) => `You received a notice about a decision ${room}` },
     pendingLeads: {
       pending_assigned: { by: (sender, room) => `${sender} opened a pending item for you on a message ${room}`, alone: (room) => `A pending item was opened for you on a message ${room}` },
+      pending_answered: { by: (sender, room) => `${sender} answered a pending item you opened ${room}`, alone: (room) => `A pending item you opened was answered ${room}` },
     },
     otherPendingLead: { by: (sender, room) => `${sender} sent a notice about a pending item ${room}`, alone: (room) => `You received a notice about a pending item ${room}` },
+    handoffLeads: {
+      handoff_offered: { by: (sender, room) => `${sender} handed you a task ${room}: accept or decline it with chat_handoff_respond before working on it`,
+        alone: (room) => `You were handed a task ${room}: accept or decline it with chat_handoff_respond before working on it` },
+      handoff_resumed: { by: (sender, room) => `${sender} resumed a task handed to you ${room}: start it again with chat_handoff_start`,
+        alone: (room) => `A task handed to you was resumed ${room}: start it again with chat_handoff_start` },
+      handoff_declined: { by: (sender, room) => `${sender} declined a task you handed ${room}: resolve, cancel or reassign the pending item`,
+        alone: (room) => `A task you handed was declined ${room}: resolve, cancel or reassign the pending item` },
+      handoff_expired: { by: (sender, room) => `A task you handed expired ${room}: resolve, cancel or reassign the pending item`,
+        alone: (room) => `A task you handed expired ${room}: resolve, cancel or reassign the pending item` },
+      handoff_attempt_unknown: { by: (sender, room) => `${sender} stopped giving signs of life on a task you handed ${room}: reconcile the attempt with chat_handoff_reconcile before anything else`,
+        alone: (room) => `An attempt of a task you handed stopped giving signs of life ${room}: reconcile it with chat_handoff_reconcile before anything else` },
+      handoff_stopped: { by: (sender, room) => `${sender} stopped a task you handed, as you asked, ${room}: resume, withdraw or reassign it`,
+        alone: (room) => `A task you handed stopped on request ${room}: resume, withdraw or reassign it` },
+      handoff_result: { by: (sender, room) => `${sender} delivered the result of a task you handed ${room}: read it with chat_room_context and resolve the pending item; do not answer the result`,
+        alone: (room) => `The result of a task you handed was delivered ${room}: read it with chat_room_context and resolve the pending item; do not answer the result` },
+    },
+    otherHandoffLead: { by: (sender, room) => `${sender} sent a notice about a handed task ${room}`, alone: (room) => `You received a notice about a handed task ${room}` },
+    handoffReference: (pendingId, handoffId, attempt) => `pending item ${pendingId}, handoff ${handoffId}${attempt ? `, attempt ${attempt}` : ''}`,
     batchLeads: {
       closed: (room, answered, total) => `Your request for replies ${room} closed: ${answered === 0 ? 'no agents' : `${answered} of ${total} ${total === 1 ? 'agent' : 'agents'}`} replied or reacted`,
       debate: (room, answered, total) => `Your debate ${room} ended: ${answered === 0 ? 'no agents' : `${answered} of ${total} ${total === 1 ? 'agent' : 'agents'}`} spoke`,
@@ -204,8 +242,27 @@ const catalogs = {
     otherDecisionLead: { by: (sender, room) => `${sender} envió un aviso sobre una decisión ${room}`, alone: (room) => `Recibiste un aviso sobre una decisión ${room}` },
     pendingLeads: {
       pending_assigned: { by: (sender, room) => `${sender} abrió un pendiente para ti sobre un mensaje ${room}`, alone: (room) => `Se abrió un pendiente para ti sobre un mensaje ${room}` },
+      pending_answered: { by: (sender, room) => `${sender} respondió a un pendiente que abriste ${room}`, alone: (room) => `Respondieron a un pendiente que abriste ${room}` },
     },
     otherPendingLead: { by: (sender, room) => `${sender} envió un aviso sobre un pendiente ${room}`, alone: (room) => `Recibiste un aviso sobre un pendiente ${room}` },
+    handoffLeads: {
+      handoff_offered: { by: (sender, room) => `${sender} te pasó una tarea ${room}: acéptala o recházala con chat_handoff_respond antes de trabajar en ella`,
+        alone: (room) => `Te pasaron una tarea ${room}: acéptala o recházala con chat_handoff_respond antes de trabajar en ella` },
+      handoff_resumed: { by: (sender, room) => `${sender} reanudó una tarea que te pasaron ${room}: empieza de nuevo con chat_handoff_start`,
+        alone: (room) => `Se reanudó una tarea que te pasaron ${room}: empieza de nuevo con chat_handoff_start` },
+      handoff_declined: { by: (sender, room) => `${sender} rechazó una tarea que pasaste ${room}: resuelve, cancela o reasigna el pendiente`,
+        alone: (room) => `Se rechazó una tarea que pasaste ${room}: resuelve, cancela o reasigna el pendiente` },
+      handoff_expired: { by: (sender, room) => `Una tarea que pasaste venció ${room}: resuelve, cancela o reasigna el pendiente`,
+        alone: (room) => `Una tarea que pasaste venció ${room}: resuelve, cancela o reasigna el pendiente` },
+      handoff_attempt_unknown: { by: (sender, room) => `${sender} dejó de dar señales en una tarea que pasaste ${room}: concilia el intento con chat_handoff_reconcile antes de cualquier otra cosa`,
+        alone: (room) => `Un intento de una tarea que pasaste dejó de dar señales ${room}: concílialo con chat_handoff_reconcile antes de cualquier otra cosa` },
+      handoff_stopped: { by: (sender, room) => `${sender} detuvo, a tu pedido, una tarea que pasaste ${room}: reanúdala, retírala o reasígnala`,
+        alone: (room) => `Una tarea que pasaste se detuvo a pedido ${room}: reanúdala, retírala o reasígnala` },
+      handoff_result: { by: (sender, room) => `${sender} entregó el resultado de una tarea que pasaste ${room}: léelo con chat_room_context y resuelve el pendiente; no respondas al resultado`,
+        alone: (room) => `Se entregó el resultado de una tarea que pasaste ${room}: léelo con chat_room_context y resuelve el pendiente; no respondas al resultado` },
+    },
+    otherHandoffLead: { by: (sender, room) => `${sender} envió un aviso sobre una tarea pasada ${room}`, alone: (room) => `Recibiste un aviso sobre una tarea pasada ${room}` },
+    handoffReference: (pendingId, handoffId, attempt) => `pendiente ${pendingId}, traspaso ${handoffId}${attempt ? `, intento ${attempt}` : ''}`,
     batchLeads: {
       closed: (room, answered, total) => `Tu solicitud de respuestas ${room} se cerró: ${answered === 0 ? 'ningún agente respondió ni reaccionó'
         : `${answered} de ${total} ${total === 1 ? 'agente' : 'agentes'} ${answered === 1 ? 'respondió o reaccionó' : 'respondieron o reaccionaron'}`}`,
@@ -392,7 +449,7 @@ export const isPendingNotice = (event) => event?.kind === 'pending';
 
 function pendingOf(event) {
   const pending = event.pending !== null && typeof event.pending === 'object' && !Array.isArray(event.pending) ? event.pending : {};
-  return { id: clean(pending.id), messageId: clean(pending.messageId) };
+  return { id: clean(pending.id), messageId: clean(pending.messageId), answerMessageId: clean(pending.answerMessageId) };
 }
 
 function pendingContent(event, attempt, texts) {
@@ -411,6 +468,7 @@ function pendingNotification(event, attempt, origin, locale) {
   if (roomId) meta.room_id = roomId;
   const pending = pendingOf(event);
   if (pending.messageId) meta.message_id = pending.messageId;
+  if (pending.answerMessageId) meta.answer_message_id = pending.answerMessageId;
   if (pending.id) meta.pending_id = pending.id;
   const roomName = clean(event.roomName);
   if (roomName) meta.room_name = roomName;
@@ -421,6 +479,48 @@ function pendingNotification(event, attempt, origin, locale) {
   Object.assign(meta, { created_at: sanitize(event.createdAt), attempt: String(attempt), origin });
   const attributes = Object.fromEntries(Object.entries(meta).map(([key, value]) => [key, attributeValue(value)]));
   return { content: pendingContent(event, attempt, noticeTexts(locale)), meta: attributes };
+}
+
+export const isMonitorHandoff = (event) => event?.kind === 'handoff' && event?.reason === 'monitor_handoff';
+export const isHandoffNotice = (event) => event?.kind === 'handoff' && !isMonitorHandoff(event);
+
+function handoffOf(event) {
+  const handoff = event.handoff !== null && typeof event.handoff === 'object' && !Array.isArray(event.handoff) ? event.handoff : {};
+  return { id: clean(handoff.id), pendingId: clean(handoff.pendingId), messageId: clean(handoff.messageId), attempt: Number.isSafeInteger(handoff.attempt) && handoff.attempt > 0 ? String(handoff.attempt) : null,
+    expectsReply: typeof handoff.expectsReply === 'boolean' ? handoff.expectsReply : null };
+}
+
+function handoffContent(event, attempt, texts) {
+  const roomName = clean(event.roomName);
+  const room = roomName ? texts.inRoom(roomName) : texts.inRoomId(clean(event.roomId));
+  const sender = senderTag(event.sender);
+  const leads = Object.hasOwn(texts.handoffLeads, event.reason) ? texts.handoffLeads[event.reason] : texts.otherHandoffLead;
+  const lead = sender ? leads.by(sender, room) : leads.alone(room);
+  const handoff = handoffOf(event);
+  const reference = handoff.id && handoff.pendingId ? ` (${texts.handoffReference(handoff.pendingId, handoff.id, handoff.attempt)})` : '';
+  const link = clean(event.link);
+  return withAttempt(link ? `${lead}${reference}: ${link}` : `${lead}${reference}.`, attempt, texts);
+}
+
+function handoffNotification(event, attempt, origin, locale) {
+  const meta = { event_id: sanitize(event.id), kind: 'handoff', reason: sanitize(event.reason) };
+  const roomId = clean(event.roomId);
+  if (roomId) meta.room_id = roomId;
+  const handoff = handoffOf(event);
+  if (handoff.messageId) meta.message_id = handoff.messageId;
+  if (handoff.id) meta.handoff_id = handoff.id;
+  if (handoff.pendingId) meta.pending_id = handoff.pendingId;
+  if (handoff.attempt) meta.attempt_number = handoff.attempt;
+  if (handoff.expectsReply !== null) meta.expects_reply = String(handoff.expectsReply);
+  const roomName = clean(event.roomName);
+  if (roomName) meta.room_name = roomName;
+  const link = clean(event.link);
+  if (link) meta.link = link;
+  const sender = senderTag(event.sender);
+  if (sender) meta.sender = sender;
+  Object.assign(meta, { created_at: sanitize(event.createdAt), attempt: String(attempt), origin });
+  const attributes = Object.fromEntries(Object.entries(meta).map(([key, value]) => [key, attributeValue(value)]));
+  return { content: handoffContent(event, attempt, noticeTexts(locale)), meta: attributes };
 }
 
 export const isReplyBatchNotice = (event) => event?.kind === 'reply_batch';
@@ -492,6 +592,7 @@ export function eventContent(event, attempt = 0, now = systemClock.now(), locale
   if (isDecisionNotice(event)) return decisionContent(event, attempt, texts);
   if (isPendingNotice(event)) return pendingContent(event, attempt, texts);
   if (isReplyBatchNotice(event)) return replyBatchContent(event, attempt, texts);
+  if (isHandoffNotice(event)) return handoffContent(event, attempt, texts);
   const sender = senderName(event.sender);
   const roomName = clean(event.roomName);
   const room = roomName ? texts.inRoom(roomName) : texts.inRoomId(clean(event.roomId));
@@ -513,6 +614,7 @@ export function eventNotification(event, { attempt = 0, origin = 'live', now = s
   if (isDecisionNotice(event)) return decisionNotification(event, attempt, origin, locale);
   if (isPendingNotice(event)) return pendingNotification(event, attempt, origin, locale);
   if (isReplyBatchNotice(event)) return replyBatchNotification(event, attempt, origin, locale);
+  if (isHandoffNotice(event)) return handoffNotification(event, attempt, origin, locale);
   const meta = {
     event_id: sanitize(event.id),
     room_id: sanitize(event.roomId),

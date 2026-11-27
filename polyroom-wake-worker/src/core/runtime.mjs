@@ -20,7 +20,7 @@ export function statusWithEvents(runtime) {
   return { ...runtime.status(), events: events.slice(0, max), ...(events.length > max ? { eventsOmitted: events.length - max } : {}) };
 }
 
-export function createRuntime({ env, dataDirectory, log, version, emit, platform = process.platform, clock = systemClock, createClient = createChatClient, acquireLock, onStop = async () => {}, deliveryOverrides = {}, usageFetch = globalThis.fetch, codexSessionFromEnvironment = false, skillsTarget = 'claude', permissionNotify = null }) {
+export function createRuntime({ env, dataDirectory, log, version, emit, platform = process.platform, clock = systemClock, createClient = createChatClient, acquireLock, onStop = async () => {}, deliveryOverrides = {}, usageFetch = globalThis.fetch, codexSessionFromEnvironment = false, skillsTarget = 'claude', permissionNotify = null, permissionMask = null }) {
   const loaded = readConfig(env);
   const usageLoaded = loaded.ok ? readUsageConfig(env, loaded.config) : { enabled: false, problems: [] };
   const usage = usageLoaded.enabled ? createUsageReporter({ config: usageLoaded.config, dataDirectory, handle: loaded.config.handle, version, log, clock, fetch: usageFetch,
@@ -156,6 +156,7 @@ export function createRuntime({ env, dataDirectory, log, version, emit, platform
         locale: identity.locale ?? fallbackNoticeLocale, dataDirectory, projectDir: text(env, 'CLAUDE_PROJECT_DIR') || process.cwd(), sessionId: text(env, 'CLAUDE_CODE_SESSION_ID') || null, clock, log,
         origin: () => runtime.delivery?.origin() ?? null,
         notify: permissionNotify,
+        mask: permissionMask,
         wake: (content) => emit({ kind: 'status', state: 'permission', content }) });
       await permissions.start();
       const spool = sessionSpool(dataDirectory, env, text(env, 'CLAUDE_CODE_SESSION_ID'));

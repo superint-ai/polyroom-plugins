@@ -58,7 +58,7 @@ If polyroom showed you a line to paste, such as `connect polyroom (workspace acm
 
 Claude proposes a handle for the new agent, such as `@claude-code`, and the workspace where it will be created. Accept it, or reply with another handle without the `@`, for example `The handle is support`: in the message box, a word that starts with `@` opens the file picker instead of sending the handle. If your account belongs to more than one workspace and the line didn't name one, Claude asks which one, and your answer is the confirmation: it connects without asking again.
 
-Claude then shows a one-time approval code and a link. Open the link, sign in with your own polyroom account, type the code and confirm. Nothing is created until you approve it. Then tell Claude it's done. Claude tells you which agent and which workspace it connected, so you can see right away if something is wrong. If the code expired or you lost it, ask Claude for a new one.
+Claude then shows a one-time approval code and a link. Open the link, sign in with your own polyroom account, type the code and confirm. Nothing is created until you approve it. Claude waits for the approval in the same turn, so you don't type anything after approving. If the code expires before you approve it, type `/polyroom:connect` again to request a new code. Claude tells you which agent and which workspace it connected, so you can see right away if something is wrong. If you lost the code, ask Claude for a new one.
 
 To connect an agent that already exists instead, for example after you reinstall the plugin, paste the line from the Connect screen of that agent, which has both the handle and the workspace: Claude takes it as your answer and your confirmation and connects without asking. If you only say the agent already exists, Claude asks which agent this session should be, every time, even if the session was connected to another agent before. Reply with the handle without the `@`, for example `The agent is support`. Claude repeats the agent and waits for you to confirm before it connects. A line with the handle but no workspace still gets the question. Only an owner or admin of the workspace, or the person who created the agent, can connect an agent that already exists.
 
@@ -102,7 +102,7 @@ Try again in a few minutes. If it still doesn't connect, contact polyroom suppor
 Never paste a token, a password or the address the browser returns to after signing in into a conversation, and never send them to anyone: you sign in only in the browser.
 
 **Claude says the connection isn't linked to an agent yet (`AGENT_NOT_BOUND`).**
-The agent isn't approved yet. Open the link Claude showed, type the code and confirm, then tell Claude it's done. If the code expired, ask Claude for a new one, or type `Connect polyroom` again.
+The agent isn't approved yet. Open the link Claude showed, type the code and confirm, then type `/polyroom:connect` again. If the code expired, ask Claude for a new one, or type `Connect polyroom` again.
 
 **Claude says the handle is already taken.**
 Another agent of the workspace has it. Accept the handle Claude proposes, or choose another one.
@@ -126,7 +126,10 @@ This is about an agent that already exists. Ask an owner or admin of your worksp
 This install already belongs to an agent. If that agent is in the same workspace, the install is already connected: ask Claude which agent it is. An owner or admin can connect it to another agent of that workspace. If the agent is in another workspace, an owner or admin of that workspace must remove the connection first: on the **Agents** page, open the agent, click **Edit** in **Connections**, click **Revoke** next to the connection under **Connections and tokens**, and click **Save**. The connection is removed only when you save. If that workspace or that agent was deleted, connecting again releases the install on its own; if the workspace is restored later, connect its agent again.
 
 **The session says the polyroom wake token was refused and stopped waiting.**
-Someone removed the connection, it expired, or the agent or its workspace was deleted. Type `Connect polyroom` again; if the agent is gone, choose another one.
+Someone removed the connection, it expired, or the agent or its workspace was deleted. Type `Connect polyroom` again; if the agent is gone, choose another one. In a session opened by the polyroom app, connect the agent again in the app instead.
+
+**Claude says the session was opened by the polyroom app and takes no connection code.**
+The polyroom app already connected this session, so there is nothing to connect. To use another agent, add it in the app.
 
 **You want this computer to answer as another agent.**
 On the **Agents** page of polyroom, open the current agent, click **Edit** in **Connections**, click **Revoke** next to the connection under **Connections and tokens**, and click **Save**. Then close the old session, or stop using it, and start a new Claude Code session: the connection belongs to this Claude Code install, not to one session, so an old session that stays open would act as the new agent with the previous one in its history. In the new session, type `Connect polyroom` and create a new agent, or say the other agent already exists and give its handle.
@@ -146,14 +149,22 @@ On the **Agents** page of polyroom, open the agent, click **Edit** in **Connecti
 ## What the plugin runs and sends
 
 - **The polyroom MCP server,** at `https://mcp.polyroom.ai/mcp`, with the sign-in from step 2. Claude uses its tools to read rooms and cards and to reply.
-- **Four hooks,** three `node ${CLAUDE_PLUGIN_ROOT}/hooks/wake.mjs` and one `node ${CLAUDE_PLUGIN_ROOT}/hooks/offer.mjs`, with no shell in between:
+- **Six hooks,** with no shell in between. Three run `node ${CLAUDE_PLUGIN_ROOT}/hooks/wake.mjs` and one runs `node ${CLAUDE_PLUGIN_ROOT}/hooks/offer.mjs`:
   - when a session starts, `wake.mjs claude session-start` asks the chat again for a notice that a previous session received but never finished, and gives it to Claude;
   - also when a session starts, `wake.mjs claude listen` runs in the background and waits for the next notice the same way, so a new session listens before its first turn;
   - also when a session starts, or after `/clear`, `offer.mjs` checks whether this Claude Code is connected. When it isn't, and you never said `not now`, it wakes the session once so Claude offers to connect. It reads the same folder as the other hooks and sends nothing;
   - when a turn ends, `wake.mjs claude wait` runs in the background and waits for the next notice for up to 29 minutes, then gives it to Claude or ends with a short "no new notices" turn.
+
+  The other two run `node ${CLAUDE_PLUGIN_ROOT}/hooks/permission.mjs`, so a prompt can be answered in the chat instead of the terminal:
+  - when Claude Code asks permission to use a tool, `permission.mjs claude permission` asks the approvers of the room or card where the work came from. Their answer allows the tool once, applies a rule or folder that Claude Code itself proposed, or denies the tool. A change of permission mode is never offered in the chat;
+  - when Claude asks a question with options (`AskUserQuestion`), `permission.mjs claude question` posts the question there and answers it with the options an approver picks.
+
+  The prompt stays in the terminal as before when the chat has no room or approver for it, when your workspace doesn't use this yet, when nobody answers within 10 minutes, when a text is too long to show whole, or when it holds a password or token that can't be hidden without hiding part of the command.
 - **What the hooks read and write:** only the folder `polyroom` inside the Claude Code configuration folder (`~/.claude/polyroom`, or `CLAUDE_CONFIG_DIR/polyroom`, or the folder in `POLYROOM_WAKE_DIR` when it is set). It holds `wake.env` with the chat address and a wake-only token, the files that keep the place in the notice queue, and `declined`, the empty file Claude writes when you say `not now`. The files can only be read by your user.
-- **What the hooks send:** `GET https://mcp.polyroom.ai/wake` with the wake-only token in the `Authorization` header, one request at a time, each waiting up to 20 seconds. When you connect, the `connect` skill runs the same script once, which sends the one-time code from the chat to the same server, `https://mcp.polyroom.ai`, and saves the wake-only token it gets back. The hooks send nothing else: no files, code or conversation.
-- **What the wake-only token can do:** fetch the notices of this agent. It can't open rooms or send messages.
+- **What the hooks send:** `GET https://mcp.polyroom.ai/wake` with the wake-only token in the `Authorization` header, one request at a time, each waiting up to 20 seconds. When you connect, the `connect` skill runs the same script once, which sends the one-time code from the chat to the same server, `https://mcp.polyroom.ai`, and saves the wake-only token it gets back. For a prompt, `permission.mjs` sends `POST https://mcp.polyroom.ai/wake/permission-requests` with the same token: the tool name, its description and its command or input, or the question and its options, with passwords, tokens and keys masked before they leave your machine. Then it reads the answer with `GET https://mcp.polyroom.ai/wake/permission-requests/<id>` every few seconds. The hooks send nothing else: no files or conversation.
+- **What the wake-only token can do:** fetch the notices of this agent, post its approval requests where its work came from and read their answers. It can't open rooms or send other messages.
+- **A custom wake folder:** When you connect, writing the code to wake.env is not pre-approved by this skill. In default mode, writing to the default staging file under ~/.claude requires permission because that folder is protected. For other folders or modes, the current permission settings determine whether Claude Code asks. The connect skill pre-approves only reading ~/.claude/polyroom.next/wake.env. If CLAUDE_CONFIG_DIR or POLYROOM_WAKE_DIR makes prepare use another path, that fixed path does not cover it, because permission rules do not expand variables, and Claude Code may also ask to read wake.env at the path printed by prepare. Check that each prompt names that file before approving it.
+- **Sessions opened by the polyroom app:** the app starts Claude Code with the chat address and the wake-only token in the environment (`POLYROOM_WAKE_URL` and `POLYROOM_WAKE_TOKEN`) and a folder of its own for each agent in `POLYROOM_WAKE_DIR`. The hooks then use those two values instead of `wake.env`, write the token to no file and take no connection code. Commands the agent runs in that session inherit the same environment, so they can read the wake-only token and the sign-in token of the `polyroom` server, as they can already read `wake.env`.
 
 ## Privacy
 

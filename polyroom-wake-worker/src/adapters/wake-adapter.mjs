@@ -13,6 +13,7 @@ const describe = (event) => {
   const references = [
     ['room', identifier(event.roomId)],
     ['message', identifier(event.messageId) ?? nested(event.pending, 'messageId')],
+    ['answer', nested(event.pending, 'answerMessageId')],
     ['card', nested(event.card, 'ref') ?? nested(event.card, 'id')],
     ['decision', nested(event.decision, 'id')],
     ['pending item', nested(event.pending, 'id')],

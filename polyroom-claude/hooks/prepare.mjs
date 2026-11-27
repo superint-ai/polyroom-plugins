@@ -1,6 +1,6 @@
 import { execFileSync, spawnSync } from 'node:child_process';
 import { chmodSync, closeSync, lstatSync, mkdirSync, openSync, readFileSync, readdirSync, renameSync, rmSync } from 'node:fs';
-import { homedir, userInfo } from 'node:os';
+import { homedir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -13,7 +13,7 @@ const posix = (process.env.POLYROOM_WAKE_TEST_PLATFORM || process.platform) !== 
 const user = posix && process.getuid ? process.getuid() : null;
 const wake = fileURLToPath(new URL('wake.mjs', import.meta.url));
 const hookFiles = ['wake.env', 'cursor', 'pending', 'pending-session', 'stopped', 'wake.lock'];
-const claimSettings = ['SystemRoot', 'USERDOMAIN', 'POLYROOM_WAKE_TEST_PLATFORM', 'NODE_EXTRA_CA_CERTS', 'NODE_USE_ENV_PROXY', 'HTTPS_PROXY', 'https_proxy', 'HTTP_PROXY', 'http_proxy', 'NO_PROXY', 'no_proxy'];
+const claimSettings = ['SystemRoot', 'POLYROOM_WAKE_TEST_PLATFORM', 'NODE_EXTRA_CA_CERTS', 'NODE_USE_ENV_PROXY', 'HTTPS_PROXY', 'https_proxy', 'HTTP_PROXY', 'http_proxy', 'NO_PROXY', 'no_proxy'];
 const retriedRename = ['EPERM', 'EBUSY', 'EACCES'];
 
 const exists = (path) => { try { lstatSync(path); return true; } catch { return false; } };
@@ -42,34 +42,68 @@ const numberSetting = (key, fallback) => {
   return /^\d+$/.test(value) ? Number(value) : fallback;
 };
 
-const escapeRegExp = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-const owner = () => (process.env.USERDOMAIN ? `${process.env.USERDOMAIN}\\${userInfo().username}` : userInfo().username);
-const icacls = (args) => execFileSync(join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'icacls.exe'), args, {
-  shell: false, windowsHide: true, timeout: Math.max(numberSetting('POLYROOM_WAKE_ICACLS_TIMEOUT_MS', 10000), 1000), stdio: ['ignore', 'pipe', 'ignore'], encoding: 'latin1',
+const aclReadScript = "$ErrorActionPreference = 'Stop'; $sidType = [System.Security.Principal.SecurityIdentifier]; foreach ($path in $env:POLYROOM_WAKE_ACL_PATHS.Split([char]10)) { $acl = Get-Acl -LiteralPath $path; [Console]::Out.Write('P ' + $acl.GetOwner($sidType).Value + ' ' + [int]$acl.AreAccessRulesProtected + [char]10); foreach ($rule in @($acl.GetAccessRules($true, $true, $sidType))) { [Console]::Out.Write('R ' + $rule.IdentityReference.Value + ' ' + [int]$rule.AccessControlType + ' ' + [int]$rule.FileSystemRights + ' ' + [int]$rule.InheritanceFlags + ' ' + [int]$rule.PropagationFlags + ' ' + [int]$rule.IsInherited + [char]10) } }";
+const allowRule = 0;
+const fullControl = 2032127;
+const folderAndFilesInherit = 3;
+const windowsTool = (path, args, environment = process.env) => execFileSync(join(process.env.SystemRoot || 'C:\\Windows', 'System32', ...path), args, {
+  shell: false, windowsHide: true, timeout: Math.max(numberSetting('POLYROOM_WAKE_ICACLS_TIMEOUT_MS', 10000), 1000), stdio: ['ignore', 'pipe', 'ignore'], encoding: 'utf8', env: environment,
 });
+const icacls = (args) => windowsTool(['icacls.exe'], args);
 
-const onlyOwnerFull = (path) => {
-  const lines = icacls([path]).split(/\r?\n/);
-  const end = lines.findIndex((line) => line.trim() === '');
-  const entries = lines.slice(0, end === -1 ? lines.length : end);
-  return entries.length === 1 && new RegExp(` ${escapeRegExp(owner())}:(?:\\((?:OI|CI|IO|NP|I)\\))*\\(F\\)$`, 'i').test(entries[0].trimEnd());
+const ownerSid = () => {
+  const found = windowsTool(['whoami.exe'], ['/user', '/fo', 'csv', '/nh']).match(/S-1-\d+(?:-\d+)+/g) || [];
+  if (found.length !== 1) throw new Error('whoami did not name one account');
+  return found[0];
 };
 
-const openToOthers = (paths) => (posix ? '' : paths.filter((path) => !onlyOwnerFull(path)).map((path) => `${path} is still open to other accounts`).join(', '));
+const aclsOf = (paths) => {
+  const acls = [];
+  const answer = windowsTool(['WindowsPowerShell', 'v1.0', 'powershell.exe'], ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', aclReadScript], { ...process.env, POLYROOM_WAKE_ACL_PATHS: paths.join('\n') });
+  for (const line of answer.split(/\r?\n/).filter(Boolean)) {
+    const [kind, ...fields] = line.split(' ');
+    if (kind === 'P' && fields.length === 2) acls.push({ owner: fields[0], closed: fields[1] === '1', rules: [] });
+    else if (kind === 'R' && fields.length === 6 && acls.length) {
+      const [sid, type, rights, inheritance, propagation, inherited] = fields;
+      acls.at(-1).rules.push({ sid, type: Number(type), rights: Number(rights), inheritance: Number(inheritance), propagation: Number(propagation), inherited: inherited === '1' });
+    } else throw new Error('the permission read back is not understood');
+  }
+  if (acls.length !== paths.length) throw new Error('the permission read back did not answer for every path');
+  return acls;
+};
+
+const onlyOwnerFull = (sid, root, path, { owner, closed, rules }) => {
+  const [rule] = rules;
+  const applies = owner === sid && rules.length === 1 && rule.sid === sid && rule.type === allowRule && rule.rights === fullControl
+    && rule.inheritance === (lstatSync(path).isDirectory() ? folderAndFilesInherit : 0) && rule.propagation === 0;
+  return path === root ? applies && closed && !rule.inherited : applies;
+};
+
+const openToOthers = (folder, files, sid = posix ? '' : ownerSid()) => {
+  if (posix) return '';
+  const paths = [folder, ...files];
+  const acls = aclsOf(paths);
+  return paths.filter((path, index) => !onlyOwnerFull(sid, folder, path, acls[index])).map((path) => `${path} is still open to other accounts`).join(', ');
+};
 
 const keepToOwner = (folder) => {
   if (posix) {
     chmodSync(folder, 0o700);
     return '';
   }
+  const sid = ownerSid();
   const files = hookFiles.map((name) => join(folder, name)).filter(exists);
+  icacls([folder, '/setowner', `*${sid}`]);
   icacls([folder, '/reset']);
-  icacls([folder, '/inheritance:r', '/grant:r', `${owner()}:(OI)(CI)F`]);
-  for (const file of files) icacls([file, '/reset']);
-  return openToOthers([folder, ...files]);
+  icacls([folder, '/inheritance:r', '/grant:r', `*${sid}:(OI)(CI)F`]);
+  for (const file of files) {
+    icacls([file, '/setowner', `*${sid}`]);
+    icacls([file, '/reset']);
+  }
+  return openToOthers(folder, files, sid);
 };
 
-const privateProblem = (folder, file) => problemWith(folder, true, true) || problemWith(file, false, true) || openToOthers([folder, file]);
+const privateProblem = (folder, file) => problemWith(folder, true, true) || problemWith(file, false, true) || openToOthers(folder, [file]);
 
 const hookEntry = (name) => [...hookFiles, '.owner-only', 'declined'].includes(name) || /^wake\.env\.\d+\.tmp$/.test(name) || /^\.(?:auth|headers|body|status)\.\d+$/.test(name);
 const foreignProblem = () => {
@@ -168,8 +202,14 @@ const cancel = () => {
   done('stdout', `Cancelled: ${staging} was removed and the earlier settings were kept.\n`, 0);
 };
 
-const actions = { prepare, claim, cancel };
-if (!Object.hasOwn(actions, action)) done('stderr', 'usage: prepare.mjs [claim|cancel]\n', 64);
+const approvalPause = () => {
+  const pauseMs = Math.max(numberSetting('POLYROOM_WAKE_APPROVAL_PAUSE_MS', 30000), 1000);
+  pause(pauseMs);
+  done('stdout', `Paused ${Math.round(pauseMs / 1000)} seconds.\n`, 0);
+};
+
+const actions = { prepare, claim, cancel, pause: approvalPause };
+if (!Object.hasOwn(actions, action)) done('stderr', 'usage: prepare.mjs [claim|cancel|pause]\n', 64);
 else {
   try { actions[action](); } catch (error) {
     let left = '';
